@@ -131,7 +131,7 @@ that makes intuitive sense. Manually verify at least one recommendation.
 
 ---
 
-## Session 5 — API Ingestion
+## Session 5 — API Ingestion ✓ COMPLETE (2026-04-17)
 
 **Goal:** Live rider data from Holdet API with one command
 
@@ -154,6 +154,10 @@ that makes intuitive sense. Manually verify at least one recommendation.
 
 **Done when:** `python3 main.py ingest --stage 1` fetches all riders,
 saves to riders.json, prints count and a sample (name, team, value).
+
+**Result:** 219/219 tests passing. `fetch_riders("612", cookie)` confirmed
+returning 91 riders live. Probe findings documented in API_NOTES.md.
+See SESSION_5_SUMMARY.md.
 
 ---
 
@@ -236,6 +240,23 @@ On a flat stage:
     crashes and missed sprints can happen
   - ANCHOR correctly keeps GC riders because their floor is higher — driven by
     reliable GC standing income, not inflated test numbers
+
+### Session 8 addition: Post-Stage-1 API endpoint investigation
+
+Session 5 live probe (pre-race) found:
+- `/api/games/612/standings` returns `[]` — check again after Stage 1, likely
+  to contain GC standings once racing starts. If confirmed, extend `fetch_riders()`
+  or add a separate `fetch_standings()` to populate `gc_position` automatically
+  (currently requires manual input).
+- `/api/games/612/rounds` and `/statistics` return HTML (Next.js pages), not JSON.
+  These are not usable as data endpoints.
+- `items[].popularity` is `null` pre-race — check after Stage 1. May contain
+  ownership percentage useful for contrarian/differential pick strategy.
+- `items[].positionId` is 264 for all riders — likely a single "cyclist" type.
+  Confirm this doesn't differentiate sprinters/climbers.
+
+Priority: confirm whether `/standings` provides GC data, as this would eliminate
+the last remaining manual input step in the ingestion pipeline.
 
 ### Session 8 addition: Odds-based probability inputs
 
