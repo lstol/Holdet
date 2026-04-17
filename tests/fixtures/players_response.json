@@ -1,0 +1,97 @@
+{
+  "items": [
+    {
+      "id": 47372,
+      "personId": 23001,
+      "teamId": 5001,
+      "price": 17500000,
+      "startPrice": 17500000,
+      "points": 0,
+      "isOut": false
+    },
+    {
+      "id": 47350,
+      "personId": 23002,
+      "teamId": 5002,
+      "price": 11500000,
+      "startPrice": 11500000,
+      "points": 0,
+      "isOut": false
+    },
+    {
+      "id": 47360,
+      "personId": 23003,
+      "teamId": 5003,
+      "price": 10000000,
+      "startPrice": 10000000,
+      "points": 0,
+      "isOut": false
+    },
+    {
+      "id": 47361,
+      "personId": 23004,
+      "teamId": 5004,
+      "price": 10000000,
+      "startPrice": 10000000,
+      "points": 0,
+      "isOut": false
+    },
+    {
+      "id": 47362,
+      "personId": 23005,
+      "teamId": 5005,
+      "price": 8000000,
+      "startPrice": 8000000,
+      "points": 0,
+      "isOut": false
+    },
+    {
+      "id": 47363,
+      "personId": 23006,
+      "teamId": 5006,
+      "price": 8000000,
+      "startPrice": 8000000,
+      "points": 0,
+      "isOut": false
+    },
+    {
+      "id": 47364,
+      "personId": 23007,
+      "teamId": 5007,
+      "price": 2500000,
+      "startPrice": 2500000,
+      "points": 125,
+      "isOut": false
+    },
+    {
+      "id": 47365,
+      "personId": 23008,
+      "teamId": 5007,
+      "price": 2500000,
+      "startPrice": 2500000,
+      "points": 0,
+      "isOut": true
+    }
+  ],
+  "_embedded": {
+    "persons": {
+      "23001": {"firstName": "Jonas", "lastName": "Vingegaard"},
+      "23002": {"firstName": "Jonathan", "lastName": "Milan"},
+      "23003": {"firstName": "Joao", "lastName": "Almeida"},
+      "23004": {"firstName": "Dylan", "lastName": "Groenewegen"},
+      "23005": {"firstName": "Giulio", "lastName": "Ciccone"},
+      "23006": {"firstName": "Derek", "lastName": "Gee"},
+      "23007": {"firstName": "Lorenzo", "lastName": "Germani"},
+      "23008": {"firstName": "Liam", "lastName": "Slock"}
+    },
+    "teams": {
+      "5001": {"name": "Team Visma | Lease a Bike", "abbreviation": "TVL"},
+      "5002": {"name": "Lidl - Trek", "abbreviation": "LTR"},
+      "5003": {"name": "UAE Team Emirates - XRG", "abbreviation": "UAE"},
+      "5004": {"name": "Unibet Rose Rockets", "abbreviation": "URR"},
+      "5005": {"name": "Lidl - Trek", "abbreviation": "LTR"},
+      "5006": {"name": "Israel - Premier Tech", "abbreviation": "IPT"},
+      "5007": {"name": "Groupama-FDJ", "abbreviation": "GFD"}
+    }
+  }
+}

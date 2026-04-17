@@ -2,19 +2,29 @@
 tests/test_optimizer.py — Unit tests for scoring/optimizer.py
 
 Key fixture:
-  - 16 riders: 8 mountain riders (current team, all GC top-10),
+  - 16 riders: 8 GC riders (current team, all GC top-10),
                8 sprinters (pool, no GC position)
   - Flat stage
-  - Mountain sim: high p10 (+20k), low p95 (+80k), ev=40k
-  - Sprinter sim:  low p10 (−20k), high p95 (+300k), ev=55k
+  - GC rider sim:   realistic flat-stage values: p10=+60k (guaranteed GC
+                    standing value), ev=+70k, p95=+100k.
+                    On a flat stage a GC top-10 rider finishes in the peloton,
+                    earns 60–100k of GC standing value regardless of stage
+                    outcome → floor is reliable but ceiling is modest.
+  - Sprinter sim:   realistic flat-stage values: p10=+25k (bad day / missed
+                    sprint), ev=+80k, p95=+300k (winning the stage).
+                    Sprinters have higher EV and ceiling but more variable
+                    floor because they can crash or miss the sprint.
   - bank=50_000_000 (not a binding constraint)
   - stages_remaining=10
 
 Expected optimizer behaviour:
-  ANCHOR     → 0 transfers (all 8 mountain riders are GC top-10 → protected)
-  BALANCED   → swaps riders where ev_gain > fee/stages_remaining
+  ANCHOR     → 0 transfers: GC top-10 riders are hard-protected AND their
+               p10 (+60k) is higher than sprinter p10 (+25k), confirming
+               ANCHOR keeps GC riders for the right reason — guaranteed
+               per-stage GC standing income, not artificially inflated p10.
+  BALANCED   → swaps some GC riders where ev_gain (80k–70k=10k) > fee/stages
   AGGRESSIVE → swaps riders where p80 improves significantly
-  ALL_IN     → swaps all 8 mountain riders for sprinters (max p95)
+  ALL_IN     → swaps all 8 GC riders for sprinters (p95 300k vs 100k)
 """
 import pytest
 
@@ -68,32 +78,45 @@ def _make_rider(
 
 
 def _mountain_sim(rid: str) -> SimResult:
-    """High floor, low ceiling — suitable for ANCHOR profile."""
+    """
+    GC rider on a flat stage — realistic values.
+
+    Even on a flat stage where GC riders are irrelevant to the sprint,
+    they earn reliable GC standing value (60–100k per stage for positions
+    1–10). This produces a high, stable floor. The ceiling is modest
+    because they won't contest the sprint.
+    """
     return SimResult(
         rider_id=rid,
-        expected_value=40_000,
-        std_dev=20_000,
-        percentile_10=20_000,
-        percentile_50=40_000,
-        percentile_80=60_000,
-        percentile_90=70_000,
-        percentile_95=80_000,
-        p_positive=0.85,
+        expected_value=70_000,
+        std_dev=15_000,
+        percentile_10=60_000,   # worst case: still earns GC standing value
+        percentile_50=70_000,
+        percentile_80=85_000,
+        percentile_90=95_000,
+        percentile_95=100_000,  # good day: GC standing + minor bonuses
+        p_positive=0.95,
     )
 
 
 def _sprinter_sim(rid: str) -> SimResult:
-    """Low floor, very high ceiling — suitable for ALL_IN profile."""
+    """
+    Sprinter on a flat stage — realistic values.
+
+    Sprinters have higher EV and ceiling (winning pays ~300k+) but a
+    lower floor than GC riders because crashes and missed sprints happen.
+    A bad day still earns moderate value (15th–20th finish + Etapebonus).
+    """
     return SimResult(
         rider_id=rid,
-        expected_value=55_000,
-        std_dev=100_000,
-        percentile_10=-20_000,
-        percentile_50=60_000,
+        expected_value=80_000,
+        std_dev=90_000,
+        percentile_10=25_000,   # bad day: crash / missed sprint, finishes 15–20th
+        percentile_50=80_000,
         percentile_80=150_000,
         percentile_90=200_000,
-        percentile_95=300_000,
-        p_positive=0.60,
+        percentile_95=300_000,  # winning the stage
+        p_positive=0.75,
     )
 
 

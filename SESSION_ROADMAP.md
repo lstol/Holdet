@@ -222,6 +222,21 @@ Tracker shows meaningful calibration data after 3+ stages.
 **Done when:** Engine matches Holdet output for 5 consecutive stages.
 At least one probability model improvement documented.
 
+### Session 8 addition: Realistic probability fixture verification
+
+Verify optimizer ANCHOR profile behaviour with realistic flat-stage probability
+inputs (GC riders earn positive EV from standing value even when irrelevant to
+stage outcome). Confirm ANCHOR retains GC top-10 riders for the right reason:
+guaranteed per-stage GC income, not artificially inflated p10 in test fixtures.
+
+On a flat stage:
+  - GC top-10 rider: finishes in peloton, earns GC standing value (60–100k),
+    p10 is positive (~60k) because standing income is guaranteed
+  - Top sprinter: higher EV and p95 ceiling but more variable floor because
+    crashes and missed sprints can happen
+  - ANCHOR correctly keeps GC riders because their floor is higher — driven by
+    reliable GC standing income, not inflated test numbers
+
 ### Session 8 addition: Odds-based probability inputs
 
 Improve prior generation by replacing flat heuristics with betting-odds-derived
