@@ -181,6 +181,18 @@ python3 main.py validate --stage N     # compare engine output vs manual input
 - Save state.json at end of every command
 - Never leave state in partially-updated condition (write atomically)
 
+**Session 5 findings that affect Session 6:**
+- `fetch_my_team()` HTML scraping confirmed working (HTTP 200, 284k chars,
+  `initialLineup` / `initialBank` / `initialCaptain` all present).
+  The `ingest` command should call this in addition to `fetch_riders()` to
+  populate `in_my_team`, `is_captain`, and `bank` in state.json automatically.
+- Confirmed rich fields available in `initialLineup[]`: `captainPopularity`,
+  `owners`, `captainOwners`, `isInjured`, `isEliminated`, `favorite` (slot 1–8).
+  Store these in state.json — useful for briefing output and injury alerts.
+- **⚠️ AWSALB is IP-sticky.** Cookie only works from the machine it was captured
+  on. Tests that call the live API must be skipped in CI / other environments.
+  Use `pytest -m "not live"` pattern or mock all HTTP for the standard test suite.
+
 **Done when:** Full daily workflow runs end-to-end. `brief` produces
 readable output. `settle` updates rider values and bank.
 

@@ -11,10 +11,11 @@ All endpoints require the session cookie from a logged-in browser.
 Store in `.env`:
 ```
 HOLDET_COOKIE=session=<uuid>; AWSALB=<token>; AWSALBCORS=<token>
+HOLDET_GAME_ID=612
 HOLDET_GAME_ID_GIRO=612
 HOLDET_GAME_ID_TDF=TBC
 HOLDET_FANTASY_TEAM_ID=6796783
-HOLDET_CARTRIDGE_GIRO=giro-d-italia-2026
+HOLDET_CARTRIDGE=giro-d-italia-2026
 HOLDET_CARTRIDGE_TDF=tour-de-france-2026
 ```
 
@@ -25,6 +26,11 @@ Refresh cookie when requests return 401/403:
 4. Find `players` request → Headers → copy Cookie value → update `.env`
 
 **Never commit `.env` to git.**
+
+**⚠️ AWSALB is IP-sticky.** The `AWSALB` and `AWSALBCORS` tokens are tied to
+the IP address of the browser that created them. The cookie will return 403 from
+any other machine or network (including CI, sandboxes, or other computers).
+Always capture the cookie from the same machine you will run the tool on.
 
 ---
 
@@ -334,12 +340,13 @@ GET /api/schedules/612
 ```
 Identical to /api/games/612. Alternative path, same data.
 
-### Fantasy Team Page URL (confirmed from referer headers)
+### Fantasy Team Page URL (confirmed working via HTML scraping)
 ```
-/da/giro-d-italia-2026/me/fantasyteams/6796783
+GET /da/giro-d-italia-2026/me/fantasyteams/6796783
 ```
-The /me/ segment = user-scoped. Team composition API call not yet isolated.
-Catch it on Stage 1: open DevTools before navigating to your team page.
+Returns 200, 284k chars of Next.js HTML. `initialLineup`, `initialBank`, and
+`initialCaptain` confirmed present in the page payload. See HTML scraping
+section below for full field list and extraction approach.
 
 ### Still to check when race starts
 ```
@@ -375,20 +382,34 @@ The HTML contains a large `self.__next_f.push(...)` block with JSON including:
 - `initialBank` — current bank balance in kr
 - `allPlayers[]` — full enriched market (all riders) with extra fields
 
-### Extra fields in allPlayers (not in /api/games/612/players)
-| Field | Meaning |
-|-------|---------|
-| `captainPopularity` | % of teams using as captain (e.g. 0.4212 = 42%) |
-| `owners` | Number of teams that own this rider |
-| `transfer` | Transfer fee in kr (= price × 0.01) |
-| `isInjured` | Boolean injury flag |
-| `isActive` | Boolean active flag |
-| `isEliminated` | Boolean eliminated flag |
-| `trend` | Price trend direction |
-| `hasWarning` | Boolean warning flag |
-| `roundPoints` | Points scored this round |
-| `growth` | Value growth this race |
-| `earnings` | Total earnings |
+### Confirmed fields in initialLineup[] objects (live QC 2026-04-17)
+
+These fields are present on each rider object inside `initialLineup`. They are
+richer than `/api/games/612/players` and are the primary source for state.json.
+
+| Field | Example | Meaning |
+|-------|---------|---------|
+| `id` | 47380 | holdet_id (primary key) |
+| `gameId` | 612 | game this rider belongs to |
+| `personId` | 4922 | key into persons lookup |
+| `teamId` | 200 | key into teams lookup |
+| `positionId` | 264 | always 264 ("cyclist") — not useful for differentiation |
+| `startPrice` | 2500000 | value at race start |
+| `price` | 2500000 | current value |
+| `points` | 0 | cumulative race points |
+| `popularity` | null | pre-race null; expected to populate during race |
+| `captainPopularity` | 0.0021 | fraction of teams using as captain (0.21%) |
+| `favorite` | 1 | slot number in your team (1–8) |
+| `owners` | 45 | number of teams that own this rider |
+| `captainOwners` | 1 | number of teams using as captain |
+| `isOutOfGame` | false | rider removed from game entirely |
+| `isActive` | true | rider active for this round |
+| `isInjured` | false | injury flag — check daily |
+| `isPublished` | true | rider visible in market |
+| `isEliminated` | false | rider eliminated from race |
+| `validFrom` | "2026-04-15T…" | when this record became valid |
+| `validTo` | null | expiry (null = still current) |
+| `_embedded` | {} | empty pre-race; may populate during race |
 
 ### Python extraction approach
 ```python

@@ -134,6 +134,32 @@ Full findings documented in API_NOTES.md under "Session 5 Probe Results".
 
 ---
 
+## Post-merge QC — live cookie validation (2026-04-17)
+
+All 5 QC steps passed after merging PR #4.
+
+**Step 1 — fetch_riders():** 91 riders, top 5 correct, 0 DNS. ✅
+
+**Step 2 — probe_extra_endpoints():** Same results as pre-merge. `/rounds` and
+`/statistics` return HTML; `/standings` returns `[]`. ✅
+
+**Step 3 — fetch_my_team() HTML scraping:** HTTP 200, 284k chars.
+`initialLineup`, `initialBank`, `initialCaptain` all confirmed present.
+Live field structure confirmed — see API_NOTES.md for full field list.
+Key fields of note: `captainPopularity`, `owners`, `captainOwners`, `isInjured`,
+`isEliminated`, `favorite` (slot 1–8). These are richer than the `/players`
+endpoint and will be the primary source for Session 6 state management. ✅
+
+**Step 4 — Round-trip:** 91 saved → 91 loaded from `data/riders.json`. ✅
+
+**Step 5 — Tests:** 219/219 passing. ✅
+
+**Important:** AWSALB is IP-sticky. The cookie only works from the machine
+it was captured on. Any other IP (CI, sandbox, other computer) gets 403.
+Documented in API_NOTES.md Authentication section.
+
+---
+
 ## Next session
 
 **Session 6 — CLI Orchestrator + State Management**
