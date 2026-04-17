@@ -1,0 +1,467 @@
+# ARCHITECTURE.md — Holdet Decision Support Tool
+# Design decisions, data schemas, module interfaces, risk profiles
+
+---
+
+## 1. Core Design Principles
+
+1. **Claude recommends, human decides.** No autonomous actions. Every
+   output is a briefing for a human decision.
+
+2. **Scoring engine is the foundation.** Validate it against real Holdet
+   results during the Giro before trusting any optimizer output. If the
+   engine is wrong, everything downstream is wrong.
+
+3. **State is explicit and persistent.** All game state in `state.json`.
+   Load at session start, save at session end. No implicit state.
+
+4. **Ingestion is pluggable.** `get_riders()` hides the data source.
+   API is confirmed and primary. Fallbacks exist for edge cases.
+
+5. **Probabilities are first-class data.** Stored, displayed, manually
+   editable, and compared against actuals for calibration.
+
+6. **Risk profiles are parallel.** Optimizer runs all four in one pass.
+   User sees full trade-off space before deciding.
+
+7. **Frontend is planned.** Architecture must support a React + Supabase
+   frontend for TdF. Keep state management clean and API-friendly from
+   the start.
+
+---
+
+## 2. Data Schemas
+
+### Rider
+
+```python
+@dataclass
+class Rider:
+    holdet_id: str             # items[].id from API (primary key)
+    person_id: str             # items[].personId (for API lookups)
+    team_id: str               # items[].teamId (for API lookups)
+    name: str                  # "{firstName} {lastName}"
+    team: str                  # full team name, e.g. "Team Visma | Lease a Bike"
+    team_abbr: str             # e.g. "TVL"
+    value: int                 # items[].price — current value in kr
+    start_value: int           # items[].startPrice — value at race start
+    points: int                # items[].points — cumulative race points
+    status: str                # "active" | "dns" (isOut=true) | "dnf" | "disqualified"
+    gc_position: int | None    # current GC position (manual input — not in API)
+    jerseys: list[str]         # jerseys held: "yellow","green","polkadot","white"
+    in_my_team: bool
+    is_captain: bool
+```
+
+### Stage
+
+```python
+@dataclass
+class Stage:
+    number: int                # 1–21
+    race: str                  # "giro_2026" | "tdf_2026"
+    stage_type: str            # "flat" | "hilly" | "mountain" | "itt" | "ttt"
+    distance_km: float
+    is_ttt: bool
+    start_location: str
+    finish_location: str
+    sprint_points: list[SprintPoint]
+    kom_points: list[KOMPoint]
+    notes: str                 # e.g. "Summit finish", "Cobbles last 30km"
+
+@dataclass
+class SprintPoint:
+    location: str
+    km_from_start: float
+    points_available: list[int]   # [20, 17, 15, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+    is_finish: bool               # True if this is the stage finish sprint
+
+@dataclass
+class KOMPoint:
+    location: str
+    km_from_start: float
+    category: str              # "HC" | "1" | "2" | "3" | "4"
+    points_available: list[int]
+```
+
+### StageResult
+
+```python
+@dataclass
+class StageResult:
+    stage_number: int
+    finish_order: list[str]              # holdet_ids in finish order (top 15+)
+    times_behind_winner: dict[str, int]  # holdet_id → seconds behind winner
+    sprint_point_winners: dict[str, list[int]]  # holdet_id → [pts at each sprint]
+    kom_point_winners: dict[str, list[int]]     # holdet_id → [pts at each KOM]
+    jersey_winners: dict[str, str]       # "yellow"|"green"|"polkadot"|"white" → holdet_id
+    most_aggressive: str | None          # holdet_id
+    dnf_riders: list[str]               # holdet_ids
+    dns_riders: list[str]               # holdet_ids (deactivated)
+    disqualified: list[str]             # holdet_ids
+    ttt_team_order: list[str] | None    # team names in placement order (TTT only)
+    gc_standings: list[str]             # holdet_ids in GC order after stage
+```
+
+### RiderProb
+
+```python
+@dataclass
+class RiderProb:
+    rider_id: str              # holdet_id
+    stage_number: int
+    p_win: float               # P(finish 1st)
+    p_top3: float              # P(finish top 3)
+    p_top10: float             # P(finish top 10)
+    p_top15: float             # P(finish top 15)
+    p_dnf: float               # P(abandons this stage)
+    p_jersey_retain: dict[str, float]   # "yellow" → P(holds it at finish)
+    expected_sprint_points: float       # ≥ 0 always
+    expected_kom_points: float          # ≥ 0 always
+    source: str                # "model" | "manual" | "adjusted"
+    model_confidence: float    # 0.0–1.0
+    manual_overrides: dict     # field → manual_value (audit trail)
+```
+
+### GameState
+
+```python
+@dataclass
+class GameState:
+    race: str                          # "giro_2026" | "tdf_2026"
+    current_stage: int
+    total_stages: int                  # 21
+    my_team: list[str]                 # holdet_ids (exactly 8)
+    captain: str                       # holdet_id
+    bank: float                        # kr in bank
+    initial_budget: float              # 50,000,000
+    stages_completed: list[int]
+    my_rank: int | None
+    total_participants: int | None
+    # History
+    prob_history: dict                 # "stage_N" → {holdet_id → RiderProb}
+    result_history: dict               # "stage_N" → StageResult
+    value_history: dict                # "stage_N" → {holdet_id → ValueDelta}
+```
+
+### RiskProfile
+
+```python
+class RiskProfile(Enum):
+    STEADY     = "steady"      # Maximize EV, minimize variance
+    BALANCED   = "balanced"    # EV with controlled upside
+    AGGRESSIVE = "aggressive"  # Maximize 80th percentile
+    LOTTERY    = "lottery"     # Maximize 95th percentile (last resort)
+```
+
+### ValueDelta (output of scoring engine)
+
+```python
+@dataclass
+class ValueDelta:
+    rider_id: str
+    # Rider value components (change rider's market value)
+    stage_position_value: int      # from finish position table
+    gc_standing_value: int         # from GC position table
+    jersey_bonus: int              # from jersey held at finish
+    sprint_kom_value: int          # points × 3,000
+    late_arrival_penalty: int      # truncated minutes × −3,000, cap −90,000
+    dnf_penalty: int               # −50,000 if DNF/DQ, else 0
+    dns_penalty: int               # −100,000 × remaining_stages if DNS
+    team_bonus: int                # from teammate's top-3 finish
+    ttt_value: int                 # from TTT team placement
+    total_rider_value_delta: int   # sum of above
+    # Bank components (go to bank, not rider value)
+    captain_bank_deposit: int      # mirrors positive rider growth if captain
+    etapebonus_bank_deposit: int   # from stage depth bonus table
+    total_bank_delta: int          # sum of bank components
+```
+
+### BriefingOutput
+
+```python
+@dataclass
+class BriefingOutput:
+    stage: Stage
+    current_team_ev: float
+    suggested_profile: RiskProfile
+    suggested_profile_reason: str
+    profiles: dict[RiskProfile, ProfileRecommendation]
+
+@dataclass
+class ProfileRecommendation:
+    profile: RiskProfile
+    transfers: list[TransferAction]
+    captain: str                   # holdet_id
+    expected_value: float
+    upside_90pct: float
+    downside_10pct: float
+    transfer_cost: int             # total fees
+    reasoning: str
+
+@dataclass
+class TransferAction:
+    action: str                    # "sell" | "buy"
+    rider_id: str
+    rider_name: str
+    value: int
+    fee: int                       # 0 for sells, 1% of value for buys
+    reasoning: str
+```
+
+---
+
+## 3. Module Interfaces
+
+### scoring/engine.py — BUILD FIRST
+
+```python
+def score_rider(
+    rider: Rider,
+    stage: Stage,
+    result: StageResult,
+    my_team: list[str],        # all 8 holdet_ids
+    captain: str,              # holdet_id of captain
+    stages_remaining: int      # for DNS cascade calculation
+) -> ValueDelta:
+    """
+    Pure function. No side effects. No I/O.
+    Returns complete value breakdown for one rider in one stage.
+    All scoring logic references rule numbers from RULES.md in comments.
+    """
+```
+
+### scoring/probabilities.py
+
+```python
+def generate_priors(
+    riders: list[Rider],
+    stage: Stage
+) -> dict[str, RiderProb]:
+    """
+    Generate model probability estimates from stage type + rider data.
+    Returns dict of holdet_id → RiderProb with source="model".
+    """
+
+def interactive_adjust(
+    probs: dict[str, RiderProb],
+    stage: Stage
+) -> dict[str, RiderProb]:
+    """
+    CLI interface: display prob table, accept manual adjustments,
+    return updated probs with source="adjusted" and audit trail.
+    Flags adjusted values with * in display.
+    """
+```
+
+### scoring/simulator.py
+
+```python
+def simulate_rider(
+    rider: Rider,
+    stage: Stage,
+    probs: RiderProb,
+    my_team: list[str],
+    captain: str,
+    n_simulations: int = 10000
+) -> SimResult:
+    """Monte Carlo simulation. Uses engine internally."""
+
+@dataclass
+class SimResult:
+    rider_id: str
+    expected_value: float
+    std_dev: float
+    percentile_10: float
+    percentile_50: float
+    percentile_80: float
+    percentile_90: float
+    percentile_95: float
+    p_positive: float
+```
+
+### scoring/optimizer.py
+
+```python
+def optimize(
+    riders: list[Rider],
+    my_team: list[str],
+    stage: Stage,
+    probs: dict[str, RiderProb],
+    bank: float,
+    risk_profile: RiskProfile,
+    rank: int | None,
+    total_participants: int | None,
+    stages_remaining: int
+) -> ProfileRecommendation:
+
+def suggest_risk_profile(
+    rank: int,
+    total: int,
+    stages_remaining: int,
+    target_rank: int = 100
+) -> tuple[RiskProfile, str]:
+    """Returns (profile, plain_english_reasoning)."""
+```
+
+### ingestion/api.py — PRIMARY DATA SOURCE
+
+```python
+def get_riders(game_id: str, cookie: str) -> list[Rider]:
+    """
+    Fetches from:
+    GET https://nexus-app-fantasy-fargate.holdet.dk/api/games/{game_id}/players
+    Headers: {"Cookie": cookie}
+
+    Parses items[] joined with _embedded.persons and _embedded.teams.
+    Maps isOut=True → status="dns".
+    GC position and jerseys not available in this endpoint — set to None/[].
+    """
+
+def find_standings_endpoint(game_id: str, cookie: str) -> dict:
+    """
+    Probe candidate endpoints for GC standings and jersey data:
+    - /api/games/{id}/rounds
+    - /api/games/{id}/standings
+    - /api/games/{id}/statistics
+    Returns raw response for inspection.
+    """
+```
+
+---
+
+## 4. Risk Profile Definitions
+
+### STEADY
+- **Objective:** Maximize expected value (EV)
+- **Captain:** Rider with highest EV for the stage
+- **Transfers:** Only if new rider has strictly higher EV, net of 1% fee
+- **When rational:** Top 20 protecting position; or early race building base
+- **Typical outcome:** +30k–+60k/stage. Low ceiling, low floor.
+
+### BALANCED
+- **Objective:** EV + moderate upside exposure
+- **Captain:** Best EV/upside ratio — may differ from pure EV pick
+- **Transfers:** Up to 2/stage if 80th percentile outcome justifies fee
+- **When rational:** Mid-table climbing without catastrophic risk
+- **Typical outcome:** +40k–+80k EV, ceiling ~+150k on good stages
+
+### AGGRESSIVE
+- **Objective:** Maximize 80th percentile outcome
+- **Captain:** Highest upside (90th pct), even at lower EV
+- **Transfers:** Accept −20k EV reduction per transfer for +50k upside gain
+- **When rational:** Need to climb 100–500 places; sprint stages with concentration
+- **Typical outcome:** Higher variance. Worse bad days, much better good days.
+
+### LOTTERY
+- **Objective:** Maximize 95th percentile outcome
+- **Captain:** Highest possible upside regardless of EV
+- **Transfers:** Concentrate on single stage scenario
+- **When rational:** 1,000+ places from target with <10 stages left
+- **Warning:** High probability of bad stage. Last resort only.
+
+### Auto-suggestion logic
+
+```python
+top_pct = rank / total
+if top_pct < 0.001:                              → STEADY   "Top 0.1% — protect it"
+if top_pct < 0.01:                               → BALANCED "Top 1% — controlled hunting"
+if stages_remaining < 5:                         → LOTTERY  "Running out of time"
+if gap > stages_remaining * 80000:               → AGGRESSIVE "Gap too large for safe play"
+else:                                            → BALANCED "Standard situation"
+```
+
+---
+
+## 5. Probability Adjustment Interface (CLI)
+
+```
+──────────────────────────────────────────────────────────
+  STAGE 12 — PROBABILITY REVIEW
+──────────────────────────────────────────────────────────
+  Rider                Team    Win%  Top3  Top15  DNF   Conf  Source
+  ──────────────────────────────────────────────────────────
+  Vingegaard J.        TVL     38%   61%   84%    2%    0.8   model
+  Milan J.             LIT     31%   55%   78%    1%    0.9   model
+  Almeida J.           UAE     12%   29%   65%    3%    0.7   model
+  Groenewegen D.        URR     8%   22%   60%    1%    0.6   model  ← low conf
+
+  Adjust (field rider value) or Enter to accept all:
+  > vingegaard win 50
+  > groenewegen dnf 8
+  > done
+
+  Updated:
+  Vingegaard J.        TVL     50%*  ...                      adjusted
+  Groenewegen D.        URR     8%   22%   60%    8%*         adjusted
+
+  * = manual override
+──────────────────────────────────────────────────────────
+```
+
+---
+
+## 6. Probability Calibration (Brier Score)
+
+Track after each stage:
+
+```python
+@dataclass
+class ProbAccuracy:
+    stage: int
+    rider_id: str
+    event: str             # "win" | "top3" | "top15" | "dnf"
+    model_prob: float
+    manual_prob: float | None
+    actual: float          # 1.0 or 0.0
+    model_brier: float     # (model_prob - actual)²
+    manual_brier: float | None
+```
+
+Season summary: "You beat the model on 8/14 stages" tells you whether
+manual adjustments are adding value going into TdF.
+
+---
+
+## 7. Frontend Architecture (Session 9 — TdF)
+
+**Stack:** React + Supabase + existing Python backend
+
+**Supabase tables mirror state.json:**
+- `game_state` — one row per race (giro/tdf)
+- `riders` — full roster with current values
+- `stages` — stage metadata
+- `stage_results` — post-stage actuals
+- `prob_snapshots` — model + manual probs per stage
+- `value_history` — per-rider value deltas per stage
+
+**Frontend pages:**
+1. **Briefing** — pre-stage 4-profile recommendation table
+2. **My Team** — current squad, values, captain indicator
+3. **History** — value over time chart, Brier score tracking
+4. **Riders** — full rider market with filters (team, price range, type)
+
+**Shareable:** Other participants can log in and use the same tool.
+Game ID is the only parameter that changes between competitions.
+
+---
+
+## 8. Validation Plan (Giro 2026)
+
+Goal: confirm engine matches Holdet site for 5 consecutive stages.
+
+Per stage:
+1. `python3 main.py settle --stage N` with actual results
+2. Compare `ValueDelta` outputs vs real Holdet value changes
+3. Log discrepancies in `tests/validation_log.md`
+4. Fix engine before proceeding to next stage
+
+Format for validation_log.md:
+```
+## Stage N — [date]
+| Rider | Engine delta | Holdet delta | Match? | Notes |
+|-------|-------------|-------------|--------|-------|
+| Vingegaard | +285,000 | +285,000 | ✓ | |
+| Milan | +178,000 | +178,000 | ✓ | |
+| Almeida | −12,000 | −9,000 | ✗ | Late arrival rounding? |
+```
