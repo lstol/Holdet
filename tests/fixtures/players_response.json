@@ -1,0 +1,1803 @@
+{
+  "items": [
+    {
+      "id": 47395,
+      "personId": 3148,
+      "teamId": 192,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47359,
+      "personId": 3405,
+      "teamId": 192,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47349,
+      "personId": 4356,
+      "teamId": 192,
+      "positionId": 264,
+      "startPrice": 9000000,
+      "price": 9000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47405,
+      "personId": 4935,
+      "teamId": 192,
+      "positionId": 264,
+      "startPrice": 9000000,
+      "price": 9000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47406,
+      "personId": 46815,
+      "teamId": 192,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47361,
+      "personId": 5017,
+      "teamId": 194,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47331,
+      "personId": 4867,
+      "teamId": 194,
+      "positionId": 264,
+      "startPrice": 5500000,
+      "price": 5500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47379,
+      "personId": 4510,
+      "teamId": 194,
+      "positionId": 264,
+      "startPrice": 5000000,
+      "price": 5000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47337,
+      "personId": 3824,
+      "teamId": 194,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47322,
+      "personId": 2608,
+      "teamId": 194,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47340,
+      "personId": 1340,
+      "teamId": 194,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47380,
+      "personId": 4922,
+      "teamId": 200,
+      "positionId": 264,
+      "startPrice": 2500000,
+      "price": 2500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47335,
+      "personId": 5029,
+      "teamId": 201,
+      "positionId": 264,
+      "startPrice": 2500000,
+      "price": 2500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47399,
+      "personId": 4405,
+      "teamId": 201,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47390,
+      "personId": 2747,
+      "teamId": 201,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47398,
+      "personId": 3539,
+      "teamId": 201,
+      "positionId": 264,
+      "startPrice": 8500000,
+      "price": 8500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47400,
+      "personId": 4301,
+      "teamId": 202,
+      "positionId": 264,
+      "startPrice": 6500000,
+      "price": 6500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47333,
+      "personId": 2129,
+      "teamId": 202,
+      "positionId": 264,
+      "startPrice": 6000000,
+      "price": 6000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47344,
+      "personId": 4662,
+      "teamId": 202,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47320,
+      "personId": 46805,
+      "teamId": 202,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47385,
+      "personId": 4921,
+      "teamId": 202,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47323,
+      "personId": 5016,
+      "teamId": 202,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47397,
+      "personId": 47175,
+      "teamId": 204,
+      "positionId": 264,
+      "startPrice": 9000000,
+      "price": 9000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47353,
+      "personId": 4508,
+      "teamId": 204,
+      "positionId": 264,
+      "startPrice": 4500000,
+      "price": 4500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47391,
+      "personId": 2190,
+      "teamId": 204,
+      "positionId": 264,
+      "startPrice": 7000000,
+      "price": 7000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47366,
+      "personId": 2751,
+      "teamId": 204,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47407,
+      "personId": 3251,
+      "teamId": 205,
+      "positionId": 264,
+      "startPrice": 4500000,
+      "price": 4500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47408,
+      "personId": 2118,
+      "teamId": 205,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47343,
+      "personId": 4193,
+      "teamId": 205,
+      "positionId": 264,
+      "startPrice": 5500000,
+      "price": 5500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47372,
+      "personId": 4196,
+      "teamId": 205,
+      "positionId": 264,
+      "startPrice": 17500000,
+      "price": 17500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47401,
+      "personId": 3900,
+      "teamId": 205,
+      "positionId": 264,
+      "startPrice": 6000000,
+      "price": 6000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47327,
+      "personId": 5010,
+      "teamId": 205,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47338,
+      "personId": 4936,
+      "teamId": 205,
+      "positionId": 264,
+      "startPrice": 5500000,
+      "price": 5500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47404,
+      "personId": 4941,
+      "teamId": 205,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47377,
+      "personId": 4904,
+      "teamId": 206,
+      "positionId": 264,
+      "startPrice": 7500000,
+      "price": 7500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47378,
+      "personId": 47214,
+      "teamId": 206,
+      "positionId": 264,
+      "startPrice": 2500000,
+      "price": 2500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47402,
+      "personId": 50504,
+      "teamId": 206,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47330,
+      "personId": 47195,
+      "teamId": 207,
+      "positionId": 264,
+      "startPrice": 5500000,
+      "price": 5500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47360,
+      "personId": 46840,
+      "teamId": 207,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47387,
+      "personId": 4919,
+      "teamId": 207,
+      "positionId": 264,
+      "startPrice": 6000000,
+      "price": 6000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47355,
+      "personId": 4967,
+      "teamId": 207,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47364,
+      "personId": 3909,
+      "teamId": 207,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47357,
+      "personId": 3277,
+      "teamId": 213,
+      "positionId": 264,
+      "startPrice": 8000000,
+      "price": 8000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47388,
+      "personId": 3244,
+      "teamId": 213,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47339,
+      "personId": 4876,
+      "teamId": 213,
+      "positionId": 264,
+      "startPrice": 8000000,
+      "price": 8000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47373,
+      "personId": 4660,
+      "teamId": 213,
+      "positionId": 264,
+      "startPrice": 11500000,
+      "price": 11500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47403,
+      "personId": 4392,
+      "teamId": 215,
+      "positionId": 264,
+      "startPrice": 7500000,
+      "price": 7500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47351,
+      "personId": 3820,
+      "teamId": 215,
+      "positionId": 264,
+      "startPrice": 9000000,
+      "price": 9000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47347,
+      "personId": 3543,
+      "teamId": 217,
+      "positionId": 264,
+      "startPrice": 7000000,
+      "price": 7000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47393,
+      "personId": 2572,
+      "teamId": 217,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47367,
+      "personId": 4653,
+      "teamId": 217,
+      "positionId": 264,
+      "startPrice": 6000000,
+      "price": 6000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47374,
+      "personId": 4381,
+      "teamId": 217,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47345,
+      "personId": 4386,
+      "teamId": 217,
+      "positionId": 264,
+      "startPrice": 5500000,
+      "price": 5500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47350,
+      "personId": 4738,
+      "teamId": 221,
+      "positionId": 264,
+      "startPrice": 2500000,
+      "price": 2500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47381,
+      "personId": 1904,
+      "teamId": 221,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47376,
+      "personId": 3250,
+      "teamId": 221,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47328,
+      "personId": 3546,
+      "teamId": 221,
+      "positionId": 264,
+      "startPrice": 7000000,
+      "price": 7000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47396,
+      "personId": 3458,
+      "teamId": 221,
+      "positionId": 264,
+      "startPrice": 6000000,
+      "price": 6000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47321,
+      "personId": 46835,
+      "teamId": 221,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47352,
+      "personId": 50781,
+      "teamId": 223,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47382,
+      "personId": 4957,
+      "teamId": 223,
+      "positionId": 264,
+      "startPrice": 2500000,
+      "price": 2500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47358,
+      "personId": 4940,
+      "teamId": 233,
+      "positionId": 264,
+      "startPrice": 9500000,
+      "price": 9500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47324,
+      "personId": 4380,
+      "teamId": 233,
+      "positionId": 264,
+      "startPrice": 6000000,
+      "price": 6000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47329,
+      "personId": 4588,
+      "teamId": 233,
+      "positionId": 264,
+      "startPrice": 2500000,
+      "price": 2500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47356,
+      "personId": 4680,
+      "teamId": 233,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47363,
+      "personId": 3890,
+      "teamId": 233,
+      "positionId": 264,
+      "startPrice": 8000000,
+      "price": 8000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47334,
+      "personId": 2477,
+      "teamId": 233,
+      "positionId": 264,
+      "startPrice": 7000000,
+      "price": 7000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47384,
+      "personId": 2977,
+      "teamId": 443,
+      "positionId": 264,
+      "startPrice": 5000000,
+      "price": 5000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47319,
+      "personId": 2638,
+      "teamId": 443,
+      "positionId": 264,
+      "startPrice": 7500000,
+      "price": 7500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47369,
+      "personId": 3910,
+      "teamId": 443,
+      "positionId": 264,
+      "startPrice": 5500000,
+      "price": 5500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47370,
+      "personId": 4388,
+      "teamId": 443,
+      "positionId": 264,
+      "startPrice": 10000000,
+      "price": 10000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47368,
+      "personId": 4568,
+      "teamId": 443,
+      "positionId": 264,
+      "startPrice": 8000000,
+      "price": 8000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47326,
+      "personId": 47204,
+      "teamId": 443,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47365,
+      "personId": 47205,
+      "teamId": 443,
+      "positionId": 264,
+      "startPrice": 6000000,
+      "price": 6000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47362,
+      "personId": 47207,
+      "teamId": 443,
+      "positionId": 264,
+      "startPrice": 4000000,
+      "price": 4000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47348,
+      "personId": 4708,
+      "teamId": 459,
+      "positionId": 264,
+      "startPrice": 8000000,
+      "price": 8000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47332,
+      "personId": 4864,
+      "teamId": 459,
+      "positionId": 264,
+      "startPrice": 6500000,
+      "price": 6500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47341,
+      "personId": 3772,
+      "teamId": 459,
+      "positionId": 264,
+      "startPrice": 2500000,
+      "price": 2500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47394,
+      "personId": 3812,
+      "teamId": 459,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47375,
+      "personId": 4714,
+      "teamId": 475,
+      "positionId": 264,
+      "startPrice": 8500000,
+      "price": 8500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47354,
+      "personId": 47158,
+      "teamId": 475,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47392,
+      "personId": 3276,
+      "teamId": 479,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47371,
+      "personId": 4962,
+      "teamId": 489,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47325,
+      "personId": 47338,
+      "teamId": 489,
+      "positionId": 264,
+      "startPrice": 2500000,
+      "price": 2500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47386,
+      "personId": 47267,
+      "teamId": 492,
+      "positionId": 264,
+      "startPrice": 5500000,
+      "price": 5500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47389,
+      "personId": 3891,
+      "teamId": 492,
+      "positionId": 264,
+      "startPrice": 7000000,
+      "price": 7000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47383,
+      "personId": 4202,
+      "teamId": 492,
+      "positionId": 264,
+      "startPrice": 5500000,
+      "price": 5500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47336,
+      "personId": 2585,
+      "teamId": 1097,
+      "positionId": 264,
+      "startPrice": 3500000,
+      "price": 3500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47409,
+      "personId": 1443,
+      "teamId": 1099,
+      "positionId": 264,
+      "startPrice": 4500000,
+      "price": 4500000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47342,
+      "personId": 3253,
+      "teamId": 1099,
+      "positionId": 264,
+      "startPrice": 10000000,
+      "price": 10000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    },
+    {
+      "id": 47346,
+      "personId": 4884,
+      "teamId": 1099,
+      "positionId": 264,
+      "startPrice": 3000000,
+      "price": 3000000,
+      "points": 0,
+      "popularity": null,
+      "isOut": false
+    }
+  ],
+  "_embedded": {
+    "persons": {
+      "1340": {
+        "id": 1340,
+        "firstName": "Diego",
+        "lastName": "Ulissi",
+        "appearance": {}
+      },
+      "1443": {
+        "id": 1443,
+        "firstName": "Wout",
+        "lastName": "Poels",
+        "appearance": {}
+      },
+      "1904": {
+        "id": 1904,
+        "firstName": "Luka",
+        "lastName": "Mezgec",
+        "appearance": {}
+      },
+      "2118": {
+        "id": 2118,
+        "firstName": "Wilco",
+        "lastName": "Kelderman",
+        "appearance": {}
+      },
+      "2129": {
+        "id": 2129,
+        "firstName": "Damiano",
+        "lastName": "Caruso",
+        "appearance": {}
+      },
+      "2190": {
+        "id": 2190,
+        "firstName": "Mikel",
+        "lastName": "Landa",
+        "appearance": {}
+      },
+      "2477": {
+        "id": 2477,
+        "firstName": "Danny",
+        "lastName": "Van Poppel",
+        "appearance": {}
+      },
+      "2572": {
+        "id": 2572,
+        "firstName": "Nelson",
+        "lastName": "Oliveira",
+        "appearance": {}
+      },
+      "2585": {
+        "id": 2585,
+        "firstName": "David",
+        "lastName": "De La Cruz",
+        "appearance": {}
+      },
+      "2608": {
+        "id": 2608,
+        "firstName": "Alberto",
+        "lastName": "Bettiol",
+        "appearance": {}
+      },
+      "2638": {
+        "id": 2638,
+        "firstName": "Adam",
+        "lastName": "Yates",
+        "appearance": {}
+      },
+      "2747": {
+        "id": 2747,
+        "firstName": "Michael",
+        "lastName": "Valgren",
+        "appearance": {}
+      },
+      "2751": {
+        "id": 2751,
+        "firstName": "Jasper",
+        "lastName": "Stuyven",
+        "appearance": {}
+      },
+      "2977": {
+        "id": 2977,
+        "firstName": "Marc",
+        "lastName": "Soler",
+        "appearance": {}
+      },
+      "3148": {
+        "id": 3148,
+        "firstName": "Oliver",
+        "lastName": "Naesen",
+        "appearance": {}
+      },
+      "3244": {
+        "id": 3244,
+        "firstName": "Max",
+        "lastName": "Walscheid",
+        "appearance": {}
+      },
+      "3250": {
+        "id": 3250,
+        "firstName": "Koen",
+        "lastName": "Bouwman",
+        "appearance": {}
+      },
+      "3251": {
+        "id": 3251,
+        "firstName": "Victor",
+        "lastName": "Campenaerts",
+        "appearance": {}
+      },
+      "3253": {
+        "id": 3253,
+        "firstName": "Dylan",
+        "lastName": "Groenewegen",
+        "appearance": {}
+      },
+      "3276": {
+        "id": 3276,
+        "firstName": "Mirco",
+        "lastName": "Maestri",
+        "appearance": {}
+      },
+      "3277": {
+        "id": 3277,
+        "firstName": "Giulio",
+        "lastName": "Ciccone",
+        "appearance": {}
+      },
+      "3405": {
+        "id": 3405,
+        "firstName": "Gregor",
+        "lastName": "Muhlberger",
+        "appearance": {}
+      },
+      "3458": {
+        "id": 3458,
+        "firstName": "Pascal",
+        "lastName": "Ackermann",
+        "appearance": {}
+      },
+      "3539": {
+        "id": 3539,
+        "firstName": "Richard",
+        "lastName": "Carapaz",
+        "appearance": {}
+      },
+      "3543": {
+        "id": 3543,
+        "firstName": "Enric",
+        "lastName": "Mas Nicolau",
+        "appearance": {}
+      },
+      "3546": {
+        "id": 3546,
+        "firstName": "Ben",
+        "lastName": "O'Connor",
+        "appearance": {}
+      },
+      "3772": {
+        "id": 3772,
+        "firstName": "Dion",
+        "lastName": "Smith",
+        "appearance": {}
+      },
+      "3812": {
+        "id": 3812,
+        "firstName": "Nick",
+        "lastName": "Schultz",
+        "appearance": {}
+      },
+      "3820": {
+        "id": 3820,
+        "firstName": "Filippo",
+        "lastName": "Ganna",
+        "appearance": {}
+      },
+      "3824": {
+        "id": 3824,
+        "firstName": "Davide",
+        "lastName": "Ballerini",
+        "appearance": {}
+      },
+      "3890": {
+        "id": 3890,
+        "firstName": "Jai",
+        "lastName": "Hindley",
+        "appearance": {}
+      },
+      "3891": {
+        "id": 3891,
+        "firstName": "Michael",
+        "lastName": "Storer",
+        "appearance": {}
+      },
+      "3900": {
+        "id": 3900,
+        "firstName": "Sepp",
+        "lastName": "Kuss",
+        "appearance": {}
+      },
+      "3909": {
+        "id": 3909,
+        "firstName": "James",
+        "lastName": "Knox",
+        "appearance": {}
+      },
+      "3910": {
+        "id": 3910,
+        "firstName": "Jhonatan Manuel",
+        "lastName": "Narvaez Prado",
+        "appearance": {}
+      },
+      "4193": {
+        "id": 4193,
+        "firstName": "Edoardo",
+        "lastName": "Affini",
+        "appearance": {}
+      },
+      "4196": {
+        "id": 4196,
+        "firstName": "Jonas",
+        "lastName": "Vingegaard",
+        "appearance": {}
+      },
+      "4202": {
+        "id": 4202,
+        "firstName": "Marc",
+        "lastName": "Hirschi",
+        "appearance": {}
+      },
+      "4301": {
+        "id": 4301,
+        "firstName": "Santiago",
+        "lastName": "Buitrago",
+        "appearance": {}
+      },
+      "4356": {
+        "id": 4356,
+        "firstName": "Felix",
+        "lastName": "Gall",
+        "appearance": {}
+      },
+      "4380": {
+        "id": 4380,
+        "firstName": "Aleksandr",
+        "lastName": "Vlasov",
+        "appearance": {}
+      },
+      "4381": {
+        "id": 4381,
+        "firstName": "Juan",
+        "lastName": "Pedro Lopez",
+        "appearance": {}
+      },
+      "4386": {
+        "id": 4386,
+        "firstName": "Einer",
+        "lastName": "Augusto Rubio",
+        "appearance": {}
+      },
+      "4388": {
+        "id": 4388,
+        "firstName": "Joao",
+        "lastName": "Almeida",
+        "appearance": {}
+      },
+      "4392": {
+        "id": 4392,
+        "firstName": "Thymen",
+        "lastName": "Arensman",
+        "appearance": {}
+      },
+      "4405": {
+        "id": 4405,
+        "firstName": "Samuele",
+        "lastName": "Battistella",
+        "appearance": {}
+      },
+      "4508": {
+        "id": 4508,
+        "firstName": "Filippo",
+        "lastName": "Zana",
+        "appearance": {}
+      },
+      "4510": {
+        "id": 4510,
+        "firstName": "Lorenzo",
+        "lastName": "Fortunato",
+        "appearance": {}
+      },
+      "4568": {
+        "id": 4568,
+        "firstName": "Jay",
+        "lastName": "Vine",
+        "appearance": {}
+      },
+      "4588": {
+        "id": 4588,
+        "firstName": "Ben",
+        "lastName": "Zwiehoff",
+        "appearance": {}
+      },
+      "4653": {
+        "id": 4653,
+        "firstName": "Javier",
+        "lastName": "Romo",
+        "appearance": {}
+      },
+      "4660": {
+        "id": 4660,
+        "firstName": "Jonathan",
+        "lastName": "Milan",
+        "appearance": {}
+      },
+      "4662": {
+        "id": 4662,
+        "firstName": "Edoardo",
+        "lastName": "Zambanini",
+        "appearance": {}
+      },
+      "4680": {
+        "id": 4680,
+        "firstName": "Frederik",
+        "lastName": "Wandahl",
+        "appearance": {}
+      },
+      "4708": {
+        "id": 4708,
+        "firstName": "Ethan",
+        "lastName": "Vernon",
+        "appearance": {}
+      },
+      "4714": {
+        "id": 4714,
+        "firstName": "Kaden",
+        "lastName": "Groves",
+        "appearance": {}
+      },
+      "4738": {
+        "id": 4738,
+        "firstName": "Filippo",
+        "lastName": "Conca",
+        "appearance": {}
+      },
+      "4864": {
+        "id": 4864,
+        "firstName": "Corbin",
+        "lastName": "Strong",
+        "appearance": {}
+      },
+      "4867": {
+        "id": 4867,
+        "firstName": "Christian",
+        "lastName": "Scaroni",
+        "appearance": {}
+      },
+      "4876": {
+        "id": 4876,
+        "firstName": "Derek",
+        "lastName": "Gee",
+        "appearance": {}
+      },
+      "4884": {
+        "id": 4884,
+        "firstName": "Elmar",
+        "lastName": "Reinders",
+        "appearance": {}
+      },
+      "4904": {
+        "id": 4904,
+        "firstName": "Lennert",
+        "lastName": "Van Eetvelt",
+        "appearance": {}
+      },
+      "4919": {
+        "id": 4919,
+        "firstName": "Max",
+        "lastName": "Poole",
+        "appearance": {}
+      },
+      "4921": {
+        "id": 4921,
+        "firstName": "Matevz",
+        "lastName": "Govekar",
+        "appearance": {}
+      },
+      "4922": {
+        "id": 4922,
+        "firstName": "Lorenzo",
+        "lastName": "Germani",
+        "appearance": {}
+      },
+      "4935": {
+        "id": 4935,
+        "firstName": "Tobias",
+        "lastName": "Lund Andresen",
+        "appearance": {}
+      },
+      "4936": {
+        "id": 4936,
+        "firstName": "Davide",
+        "lastName": "Piganzoli",
+        "appearance": {}
+      },
+      "4940": {
+        "id": 4940,
+        "firstName": "Giulio",
+        "lastName": "Pellizzari",
+        "appearance": {}
+      },
+      "4941": {
+        "id": 4941,
+        "firstName": "Timo",
+        "lastName": "Kielich",
+        "appearance": {}
+      },
+      "4957": {
+        "id": 4957,
+        "firstName": "Manuele",
+        "lastName": "Tarozzi",
+        "appearance": {}
+      },
+      "4962": {
+        "id": 4962,
+        "firstName": "Johannes",
+        "lastName": "Kulset",
+        "appearance": {}
+      },
+      "4967": {
+        "id": 4967,
+        "firstName": "Frank",
+        "lastName": "van den Broek",
+        "appearance": {}
+      },
+      "5010": {
+        "id": 5010,
+        "firstName": "Bart",
+        "lastName": "Lemmen",
+        "appearance": {}
+      },
+      "5016": {
+        "id": 5016,
+        "firstName": "Alec",
+        "lastName": "Segaert",
+        "appearance": {}
+      },
+      "5017": {
+        "id": 5017,
+        "firstName": "Harold Martin",
+        "lastName": "Lopez",
+        "appearance": {}
+      },
+      "5029": {
+        "id": 5029,
+        "firstName": "Darren",
+        "lastName": "Rafferty",
+        "appearance": {}
+      },
+      "46805": {
+        "id": 46805,
+        "firstName": "Afonso",
+        "lastName": "Eulálio",
+        "appearance": {}
+      },
+      "46815": {
+        "id": 46815,
+        "firstName": "Tord",
+        "lastName": "Gudmestad",
+        "appearance": {}
+      },
+      "46835": {
+        "id": 46835,
+        "firstName": "Alan",
+        "lastName": "Hatherly",
+        "appearance": {}
+      },
+      "46840": {
+        "id": 46840,
+        "firstName": "Guillermo",
+        "lastName": "Juan Martinez",
+        "appearance": {}
+      },
+      "47158": {
+        "id": 47158,
+        "firstName": "Francesco",
+        "lastName": "Busatto",
+        "appearance": {}
+      },
+      "47175": {
+        "id": 47175,
+        "firstName": "Paul",
+        "lastName": "Magnier",
+        "appearance": {}
+      },
+      "47195": {
+        "id": 47195,
+        "firstName": "Casper",
+        "lastName": "van Uden",
+        "appearance": {}
+      },
+      "47204": {
+        "id": 47204,
+        "firstName": "António",
+        "lastName": "Morgado",
+        "appearance": {}
+      },
+      "47205": {
+        "id": 47205,
+        "firstName": "Jan",
+        "lastName": "Christen",
+        "appearance": {}
+      },
+      "47207": {
+        "id": 47207,
+        "firstName": "Igor",
+        "lastName": "Arrieta",
+        "appearance": {}
+      },
+      "47214": {
+        "id": 47214,
+        "firstName": "Liam",
+        "lastName": "Slock",
+        "appearance": {}
+      },
+      "47267": {
+        "id": 47267,
+        "firstName": "Mathys",
+        "lastName": "Rondel",
+        "appearance": {}
+      },
+      "47338": {
+        "id": 47338,
+        "firstName": "Anders",
+        "lastName": "Skaarseth",
+        "appearance": {}
+      },
+      "50504": {
+        "id": 50504,
+        "firstName": "Simone",
+        "lastName": "Gualdi",
+        "appearance": {}
+      },
+      "50781": {
+        "id": 50781,
+        "firstName": "Filippo",
+        "lastName": "Turconi",
+        "appearance": {}
+      }
+    },
+    "positions": {
+      "264": {
+        "id": 264,
+        "rulesetId": 117,
+        "avatar": "none",
+        "name": "cycling_category_rider",
+        "title": "Rytter",
+        "abbreviation": "",
+        "order": 1,
+        "providerPositionId": null
+      }
+    },
+    "teams": {
+      "192": {
+        "id": 192,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "decathlon_cma_cgm_team",
+        "name": "Decathlon CMA CGM Team",
+        "abbreviation": "DAT",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "194": {
+        "id": 194,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "xds_astana_team",
+        "name": "XDS Astana Team",
+        "abbreviation": "XAT",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "200": {
+        "id": 200,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "groupama_fdj_united",
+        "name": "Groupama - FDJ United",
+        "abbreviation": "GFC",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "201": {
+        "id": 201,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "ef_education_easypost",
+        "name": "EF Education - EasyPost",
+        "abbreviation": "EFE",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "202": {
+        "id": 202,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "bahrain_victorious",
+        "name": "Bahrain - Victorious",
+        "abbreviation": "TBV",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "204": {
+        "id": 204,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "soudal_quick_step",
+        "name": "Soudal Quick-Step",
+        "abbreviation": "SOQ",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "205": {
+        "id": 205,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "team_visma_lease_a_bike",
+        "name": "Team Visma | Lease a Bike",
+        "abbreviation": "TVL",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "206": {
+        "id": 206,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "lotto_intermarche",
+        "name": "Lotto Intermarché",
+        "abbreviation": "LOI",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "207": {
+        "id": 207,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "team_picnic_postnl",
+        "name": "Team Picnic PostNL",
+        "abbreviation": "DFP",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "213": {
+        "id": 213,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "lidl_trek",
+        "name": "Lidl - Trek",
+        "abbreviation": "LIT",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "215": {
+        "id": 215,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "ineos_grenadiers",
+        "name": "INEOS Grenadiers",
+        "abbreviation": "IGD",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "217": {
+        "id": 217,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "movistar_team",
+        "name": "Movistar Team",
+        "abbreviation": "MOV",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "221": {
+        "id": 221,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "team_jayco_alula",
+        "name": "Team Jayco AlUla",
+        "abbreviation": "JAY",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "223": {
+        "id": 223,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "bardiani_csf_7_saber",
+        "name": "Bardiani CSF 7 Saber",
+        "abbreviation": "BAR",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "233": {
+        "id": 233,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "red_bull_bora_hansgrohe",
+        "name": "Red Bull - BORA - hansgrohe",
+        "abbreviation": "RBH",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "443": {
+        "id": 443,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "uae_team_emirates_xrg",
+        "name": "UAE Team Emirates - XRG",
+        "abbreviation": "UAD",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "459": {
+        "id": 459,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "nsn_cycling_team",
+        "name": "NSN Cycling Team",
+        "abbreviation": "NSN",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "475": {
+        "id": 475,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "alpecin_premier_tech",
+        "name": "Alpecin-Premier Tech",
+        "abbreviation": "APT",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "479": {
+        "id": 479,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "team_polti_visitmalta",
+        "name": "Team Polti VisitMalta",
+        "abbreviation": "PTV",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "489": {
+        "id": 489,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "uno_x_mobility",
+        "name": "Uno-X Mobility",
+        "abbreviation": "UXM",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "492": {
+        "id": 492,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "tudor_pro_cycling_team",
+        "name": "Tudor Pro Cycling Team",
+        "abbreviation": "TUD",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "1097": {
+        "id": 1097,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "pinarello_q36_5_pro_cycling_team",
+        "name": "Pinarello Q36.5 Pro Cycling Team",
+        "abbreviation": "Q36",
+        "imageUrl": null,
+        "isActive": false
+      },
+      "1099": {
+        "id": 1099,
+        "providerId": 0,
+        "externalId": null,
+        "slug": "unibet_rose_rockets",
+        "name": "Unibet Rose Rockets",
+        "abbreviation": "URR",
+        "imageUrl": null,
+        "isActive": false
+      }
+    }
+  },
+  "pageInfo": {
+    "hasNextPage": false,
+    "endCursor": null
+  }
+}

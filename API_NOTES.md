@@ -149,6 +149,46 @@ Not useful for team data.
 
 ---
 
+## Session 5 Probe Results (2026-04-17, pre-race)
+
+Probed with live cookie via `probe_extra_endpoints("612", cookie)`:
+
+| Endpoint | HTTP | Result |
+|----------|------|--------|
+| `/api/games/612/rounds` | 200 | Returns **HTML** (Next.js page render, not JSON) |
+| `/api/games/612/standings` | 200 | Returns `[]` — empty array, race not started |
+| `/api/games/612/statistics` | 200 | Returns **HTML** (Next.js page render, not JSON) |
+
+**Key findings:**
+- `/rounds` and `/statistics` are Next.js frontend routes masquerading as API paths —
+  they return the full server-rendered HTML, not JSON. Not useful for data ingestion.
+- `/standings` returns `[]` pre-race. Check again after Stage 1 — may contain GC
+  standings once racing starts.
+- GC standings and jersey data are still NOT available via any confirmed JSON endpoint.
+  Continue using manual input for these fields until confirmed post Stage 1.
+
+**Real API field discovery** (from live `/players` response):
+
+Additional fields present in `items[]` not previously documented:
+| Field | Value | Notes |
+|-------|-------|-------|
+| `positionId` | 264 (all riders) | Position type — 264 appears to be "cyclist". Single value for all, not useful for differentiation yet. |
+| `popularity` | null (pre-race) | Expected to populate once race starts — likely % ownership or captain pick rate. |
+
+Real ID mapping for known riders:
+| Rider | holdet_id | personId | teamId |
+|-------|-----------|----------|--------|
+| Jonas Vingegaard | 47372 | 4196 | 205 (TVL) |
+| Jonathan Milan | 47373 | — | — (LIT) |
+| Joao Almeida | 47370 | — | — (UAD) |
+
+Person objects in `_embedded.persons` have an `appearance` sub-object (empty pre-race).
+Team objects in `_embedded.teams` have numeric keys in the API.
+
+Total roster: **91 riders**, 23 teams.
+
+---
+
 ## Endpoints Still To Investigate
 
 Try these while logged in — paste URL in browser address bar:
