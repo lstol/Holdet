@@ -148,10 +148,10 @@ class GameState:
 
 ```python
 class RiskProfile(Enum):
-    STEADY     = "steady"      # Maximize EV, minimize variance
-    BALANCED   = "balanced"    # EV with controlled upside
-    AGGRESSIVE = "aggressive"  # Maximize 80th percentile
-    LOTTERY    = "lottery"     # Maximize 95th percentile (last resort)
+    ANCHOR     = "anchor"      # Maximise floor (p10) — protect GC riders
+    BALANCED   = "balanced"    # Maximise expected value (EV)
+    AGGRESSIVE = "aggressive"  # Maximise 80th percentile
+    ALL_IN     = "all_in"      # Maximise 95th percentile — conviction bet
 ```
 
 ### ValueDelta (output of scoring engine)
@@ -288,6 +288,7 @@ def optimize(
     my_team: list[str],
     stage: Stage,
     probs: dict[str, RiderProb],
+    sim_results: dict[str, SimResult],   # pre-computed from simulator
     bank: float,
     risk_profile: RiskProfile,
     rank: int | None,
@@ -295,13 +296,26 @@ def optimize(
     stages_remaining: int
 ) -> ProfileRecommendation:
 
-def suggest_risk_profile(
+def optimize_all_profiles(
+    riders: list[Rider],
+    my_team: list[str],
+    stage: Stage,
+    probs: dict[str, RiderProb],
+    sim_results: dict[str, SimResult],
+    bank: float,
+    rank: int | None,
+    total_participants: int | None,
+    stages_remaining: int
+) -> dict[RiskProfile, ProfileRecommendation]:
+    """Run all 4 profiles in one pass. Returns all 4 recommendations."""
+
+def suggest_profile(
     rank: int,
     total: int,
     stages_remaining: int,
     target_rank: int = 100
 ) -> tuple[RiskProfile, str]:
-    """Returns (profile, plain_english_reasoning)."""
+    """Returns (profile, plain_english_reason)."""
 ```
 
 ### ingestion/api.py — PRIMARY DATA SOURCE
@@ -332,43 +346,67 @@ def find_standings_endpoint(game_id: str, cookie: str) -> dict:
 
 ## 4. Risk Profile Definitions
 
-### STEADY
-- **Objective:** Maximize expected value (EV)
-- **Captain:** Rider with highest EV for the stage
-- **Transfers:** Only if new rider has strictly higher EV, net of 1% fee
-- **When rational:** Top 20 protecting position; or early race building base
-- **Typical outcome:** +30k–+60k/stage. Low ceiling, low floor.
+**CRITICAL DESIGN PRINCIPLE:** Profiles are defined by SQUAD COMPOSITION
+OBJECTIVE, not by transfer count. Transfer count is an OUTPUT of the
+optimizer, never an input constraint. On a sprint stage after a mountain
+stage, ALL_IN may require 6–7 transfers. On two consecutive sprint stages,
+ANCHOR may also require 0 transfers. The profile tells the optimizer WHAT
+to optimise for — transfers follow naturally.
+
+### ANCHOR
+- **Objective:** Maximise floor value. Prefer certain, repeatable sources.
+- **Squad target:** Retain GC riders (guaranteed 60–100k/stage from standing),
+  retain jersey holders, fill remaining slots with highest-EV available for
+  this stage type.
+- **Captain:** Highest EV rider on the team.
+- **Transfer logic:** Only transfer if the replacement rider has strictly
+  higher EV than the sold rider, net of the 1% fee amortised across
+  stages_remaining. Never sacrifice a GC top-10 rider.
+- **Optimisation metric:** `percentile_10` (maximise the bad-day outcome)
 
 ### BALANCED
-- **Objective:** EV + moderate upside exposure
-- **Captain:** Best EV/upside ratio — may differ from pure EV pick
-- **Transfers:** Up to 2/stage if 80th percentile outcome justifies fee
-- **When rational:** Mid-table climbing without catastrophic risk
-- **Typical outcome:** +40k–+80k EV, ceiling ~+150k on good stages
+- **Objective:** Maximise total expected value across all scoring sources.
+- **Squad target:** Best risk-adjusted mix of GC riders + stage-type
+  specialists. Targets ~3–5 riders in stage top 15 for moderate Etapebonus.
+- **Captain:** Rider with best EV/std_dev ratio for this stage.
+- **Transfer logic:** Transfer if `(new_rider_EV − sold_rider_EV) > fee / stages_remaining`
+- **Optimisation metric:** `expected_value` (EV)
 
 ### AGGRESSIVE
-- **Objective:** Maximize 80th percentile outcome
-- **Captain:** Highest upside (90th pct), even at lower EV
-- **Transfers:** Accept −20k EV reduction per transfer for +50k upside gain
-- **When rational:** Need to climb 100–500 places; sprint stages with concentration
-- **Typical outcome:** Higher variance. Worse bad days, much better good days.
+- **Objective:** Maximise ceiling. Overload stage-type specialists to chase
+  Etapebonus and stage bonuses, even at the cost of GC certainty.
+- **Squad target:**
+  - Flat stage: maximise number of sprinters likely to finish top 15
+    (chase nonlinear Etapebonus: 6 riders = 120k, 8 = 400k)
+  - Mountain stage: load elite climbers who fight for stage + GC time
+  - ITT: TT specialists + protect against late-arrival penalty exposure
+  - TTT: concentrate on riders from the strongest TTT teams (2× = 400k)
+- **Captain:** Highest p90 rider for this specific stage type.
+- **Transfer logic:** Accept up to −30k EV reduction per transfer if p90
+  improves by +80k or more.
+- **Optimisation metric:** `percentile_80`
 
-### LOTTERY
-- **Objective:** Maximize 95th percentile outcome
-- **Captain:** Highest possible upside regardless of EV
-- **Transfers:** Concentrate on single stage scenario
-- **When rational:** 1,000+ places from target with <10 stages left
-- **Warning:** High probability of bad stage. Last resort only.
+### ALL_IN
+- **Objective:** Maximum upside. Deliberate high-risk, high-reward squad.
+  This is a conviction bet, not a random guess.
+- **Squad target:** Concentrate on the single most likely scenario for this
+  stage — e.g. all sprinters from 2–3 teams most likely to win; or all
+  climbers from one dominant team on a summit finish. Explicitly target the
+  400k Etapebonus cliff (8 riders top 15).
+- **Captain:** Highest p95 rider regardless of EV.
+- **Transfer logic:** Optimise purely for p95 outcome. Fee payback is a
+  secondary concern.
+- **Optimisation metric:** `percentile_95`
 
 ### Auto-suggestion logic
 
 ```python
 top_pct = rank / total
-if top_pct < 0.001:                              → STEADY   "Top 0.1% — protect it"
-if top_pct < 0.01:                               → BALANCED "Top 1% — controlled hunting"
-if stages_remaining < 5:                         → LOTTERY  "Running out of time"
-if gap > stages_remaining * 80000:               → AGGRESSIVE "Gap too large for safe play"
-else:                                            → BALANCED "Standard situation"
+if top_pct < 0.001:                              → ANCHOR     "Top 0.1% — protect elite position"
+if top_pct < 0.01:                               → BALANCED   "Top 1% — controlled hunting"
+if stages_remaining < 5:                         → ALL_IN     "Running out of time"
+if gap > stages_remaining * 80_000:              → AGGRESSIVE "Gap too large for safe play"
+else:                                            → BALANCED   "Standard situation"
 ```
 
 ---
