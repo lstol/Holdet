@@ -222,6 +222,25 @@ Tracker shows meaningful calibration data after 3+ stages.
 **Done when:** Engine matches Holdet output for 5 consecutive stages.
 At least one probability model improvement documented.
 
+### Session 8 addition: Odds-based probability inputs
+
+Improve prior generation by replacing flat heuristics with betting-odds-derived
+probabilities. Two input types are available:
+
+1. Outright win odds — seed p_win and p_top3 for top 10-15 riders per stage
+2. Head-to-head odds — refine relative ordering between rider pairs, especially
+   useful for sprinters and climbers where outright market is shallow
+
+Workflow to implement:
+- Small CLI that accepts (rider_fragment, odds) pairs and converts to implied
+  probabilities (1/odds, normalised to remove bookmaker overround)
+- H2H pairs can be chained to build consistent probability ladder across a group
+- Output feeds directly into interactive_adjust() as pre-filled starting point
+  rather than flat model priors
+- User reviews and confirms before saving to state.json
+
+This is the single highest-impact probability model improvement available.
+
 ---
 
 ## Session 9 — TdF Frontend (React + Supabase)
