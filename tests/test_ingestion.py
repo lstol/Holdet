@@ -72,9 +72,18 @@ class TestParsePlayersResponse:
         assert vingegaard.start_value == 17_500_000
 
     def test_points_parsed_correctly(self):
-        riders = _parse_players_response(SAMPLE_RESPONSE)
-        germani = next(r for r in riders if r.holdet_id == "47364")
-        assert germani.points == 125
+        # Use a synthetic item since points=0 for all riders pre-race
+        data = {
+            "items": [{"id": 99, "personId": 1, "teamId": 1,
+                        "price": 5000000, "startPrice": 5000000,
+                        "points": 250, "isOut": False}],
+            "_embedded": {
+                "persons": {"1": {"firstName": "Test", "lastName": "Rider"}},
+                "teams": {"1": {"name": "Team A", "abbreviation": "TA"}},
+            }
+        }
+        riders = _parse_players_response(data)
+        assert riders[0].points == 250
 
     def test_null_points_becomes_zero(self):
         data = {
@@ -90,10 +99,18 @@ class TestParsePlayersResponse:
         assert riders[0].points == 0
 
     def test_is_out_true_sets_status_dns(self):
-        riders = _parse_players_response(SAMPLE_RESPONSE)
-        # Liam Slock (id=47365) has isOut=true in fixture
-        slock = next(r for r in riders if r.holdet_id == "47365")
-        assert slock.status == "dns"
+        # Use a synthetic item — no DNS riders pre-race in the real fixture
+        data = {
+            "items": [{"id": 99, "personId": 1, "teamId": 1,
+                        "price": 2500000, "startPrice": 2500000,
+                        "points": 0, "isOut": True}],
+            "_embedded": {
+                "persons": {"1": {"firstName": "Out", "lastName": "Rider"}},
+                "teams": {"1": {"name": "Team A", "abbreviation": "TA"}},
+            }
+        }
+        riders = _parse_players_response(data)
+        assert riders[0].status == "dns"
 
     def test_is_out_false_sets_status_active(self):
         riders = _parse_players_response(SAMPLE_RESPONSE)
@@ -170,12 +187,12 @@ class TestParsePlayersResponse:
     def test_person_id_stored_on_rider(self):
         riders = _parse_players_response(SAMPLE_RESPONSE)
         vingegaard = next(r for r in riders if r.holdet_id == "47372")
-        assert vingegaard.person_id == "23001"
+        assert vingegaard.person_id == "4196"  # real personId from API
 
     def test_team_id_stored_on_rider(self):
         riders = _parse_players_response(SAMPLE_RESPONSE)
         vingegaard = next(r for r in riders if r.holdet_id == "47372")
-        assert vingegaard.team_id == "5001"
+        assert vingegaard.team_id == "205"  # real teamId from API
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
