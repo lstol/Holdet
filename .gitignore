@@ -5,7 +5,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
-*.har
 *.zip
 *.docx
 FIRST_SESSION_PROMPT.md
