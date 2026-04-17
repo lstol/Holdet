@@ -94,16 +94,43 @@ Appended Session 8 note on realistic flat-stage fixture verification.
 
 ---
 
-## probe_extra_endpoints — discovery results
+## Live API run — confirmed results (2026-04-17, pre-race)
 
-The function probes `/rounds`, `/standings`, `/statistics`. To be run with
-a live cookie before Stage 1. Findings will be documented in API_NOTES.md
-once the race starts and real data is available.
+`fetch_riders("612", cookie)` returned **91 riders**, 23 teams, all `points=0`,
+0 DNS riders (race not yet started). Top 5 by value:
 
-Until then, the candidates remain in "to investigate" status per API_NOTES.md.
-The HTML page scraping approach (`/da/{cartridge}/me/fantasyteams/{id}`)
-documented in Session 4 exploration is the confirmed path for team composition
-and bank balance.
+| Rider | Team | Value |
+|-------|------|-------|
+| Jonas Vingegaard | TVL | 17,500,000 |
+| Jonathan Milan | LIT | 11,500,000 |
+| Joao Almeida | UAD | 10,000,000 |
+| Dylan Groenewegen | URR | 10,000,000 |
+| Giulio Pellizzari | RBH | 9,500,000 |
+
+Real IDs confirmed: Vingegaard `holdet_id=47372`, `personId=4196`, `teamId=205`.
+
+**Previously unknown fields** found in live response:
+- `positionId=264` — same for all 91 riders (single position type "cyclist")
+- `popularity=null` — expected to populate once race starts
+
+## probe_extra_endpoints — confirmed findings (2026-04-17)
+
+| Endpoint | HTTP | Result |
+|----------|------|--------|
+| `/api/games/612/rounds` | 200 | **HTML** — Next.js frontend route, not a JSON API |
+| `/api/games/612/standings` | 200 | `[]` — empty array pre-race |
+| `/api/games/612/statistics` | 200 | **HTML** — Next.js frontend route, not a JSON API |
+
+**Conclusions:**
+- `/rounds` and `/statistics` are not usable as data endpoints — they return the
+  full server-rendered HTML page, not JSON.
+- `/standings` returns `[]` before the race. **Check again after Stage 1** — likely
+  to contain GC standings once racing starts.
+- GC standings and jersey data remain unavailable via any confirmed JSON endpoint.
+  Continue using manual input for these fields until `/standings` is confirmed
+  post-Stage 1.
+
+Full findings documented in API_NOTES.md under "Session 5 Probe Results".
 
 ---
 
