@@ -125,6 +125,7 @@ holdet/
 │
 └── tests/
     ├── test_engine.py
+    ├── test_probabilities.py
     ├── test_optimizer.py
     └── validation_log.md       ← engine vs actual, stage by stage
 ```
@@ -165,8 +166,8 @@ pip3 install pytest rich numpy requests python-dotenv
 
 | Session | Goal |
 |---------|------|
-| 1 | Scoring engine + full test suite |
-| 2 | Probability layer + manual adjustment CLI |
+| 1 ✓ | Scoring engine + full test suite |
+| 2 ✓ | Probability layer + manual adjustment CLI |
 | 3 | Monte Carlo simulator |
 | 4 | Optimizer + 4 risk profiles |
 | 5 | API ingestion (confirmed endpoint) |

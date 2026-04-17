@@ -47,13 +47,13 @@ from Holdet site if Giro has started.
 
 ---
 
-## Session 2 — Probability Layer
+## Session 2 — Probability Layer ✓ COMPLETE (2026-04-17)
 
 **Goal:** Probability model + manual adjustment CLI
 
 **Start by reading:** README.md, ARCHITECTURE.md (RiderProb schema)
 
-**Builds:** `scoring/probabilities.py`
+**Builds:** `scoring/probabilities.py`, `tests/test_probabilities.py`
 
 **Key features:**
 - `RiderProb` dataclass with all fields
@@ -72,6 +72,8 @@ from Holdet site if Giro has started.
 
 **Done when:** Can generate prob table for a stage, adjust two riders,
 and confirm changes persist to state.json.
+
+**Result:** 84/84 tests passing (59 engine + 25 probability). See SESSION_2_SUMMARY.md.
 
 ---
 
