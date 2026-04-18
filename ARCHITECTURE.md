@@ -28,6 +28,21 @@
    frontend for TdF. Keep state management clean and API-friendly from
    the start.
 
+8. **Bug-fix-first.** If the engine produces a wrong result against a real
+   Holdet stage, stop all feature work and fix the engine before proceeding.
+   An incorrect engine invalidates every downstream recommendation. Giro 2026
+   is the validation run — treat each discrepancy in tests/validation_log.md
+   as a blocker.
+
+9. **Engine caller responsibilities.** `score_rider()` is a pure function but
+   callers have three critical obligations:
+   - Pass `all_riders={holdet_id: Rider}` for all active riders — team bonus
+     is 0 without it (engine cannot compute teammate finish positions otherwise).
+   - Credit `etapebonus_bank_deposit` exactly ONCE per stage (read it from any
+     one rider's ValueDelta — the engine returns the same value for all). Summing
+     it across all 8 riders inflates bank by 8×.
+   - Build `StageResult` once before the per-rider loop, not once per rider.
+
 ---
 
 ## 2. Data Schemas
