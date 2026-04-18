@@ -11,6 +11,10 @@ One call returns:
 
 GC position and jerseys are NOT available in this endpoint.
 Those fields are set to None/[] and populated externally from state.json.
+
+Fantasy team data is scraped from the Next.js HTML team page:
+  GET https://nexus-app-fantasy-fargate.holdet.dk/da/{cartridge}/me/fantasyteams/{id}
+  Data embedded in self.__next_f.push([1, "..."]) script blocks.
 """
 from __future__ import annotations
 
@@ -176,6 +180,124 @@ def probe_extra_endpoints(game_id: str, cookie: str) -> dict:
             results[path] = {"status": None, "data": str(exc)}
 
     return results
+
+
+def fetch_my_team(fantasy_team_id: str, cartridge: str, cookie: str) -> dict:
+    """
+    Fetch current team state by scraping the Next.js HTML team page.
+
+    There is no clean REST endpoint for team composition. The data is embedded
+    in the server-rendered HTML as self.__next_f.push(...) payloads.
+
+    Parameters
+    ----------
+    fantasy_team_id : str
+        e.g. "6796783"
+    cartridge : str
+        e.g. "giro-d-italia-2026"
+    cookie : str
+        Full session cookie string.
+
+    Returns
+    -------
+    dict with keys:
+        "lineup"  : list[dict]  — each player object from initialLineup[]
+        "captain" : str         — holdet_id of current captain
+        "bank"    : int         — current bank balance in kr
+
+    Raises
+    ------
+    PermissionError  — 401/403 or page missing initialLineup (expired cookie)
+    ConnectionError  — network failure
+    ValueError       — page parsed but expected keys not found
+    """
+    url = f"{_BASE_URL}/da/{cartridge}/me/fantasyteams/{fantasy_team_id}"
+    try:
+        response = requests.get(url, headers={"Cookie": cookie}, timeout=30)
+    except requests.exceptions.ConnectionError as exc:
+        raise ConnectionError(f"Network error fetching team page: {exc}") from exc
+    except requests.exceptions.Timeout as exc:
+        raise ConnectionError("Request timed out fetching team page") from exc
+
+    if response.status_code in (401, 403):
+        raise PermissionError(
+            "Cookie expired. Refresh from Chrome DevTools → "
+            "Network → players request → Cookie header. "
+            "Update HOLDET_COOKIE in .env"
+        )
+    response.raise_for_status()
+
+    return _parse_my_team_html(response.text)
+
+
+def _parse_my_team_html(html: str) -> dict:
+    """
+    Parse initialLineup, initialCaptain, initialBank from Next.js HTML.
+
+    The page embeds data in self.__next_f.push([1, "..."]) script blocks.
+    We find the block containing 'initialLineup' and extract the JSON.
+
+    Extracted as a separate function to allow unit testing without HTTP.
+    """
+    import re
+
+    if "initialLineup" not in html:
+        raise PermissionError(
+            "Team page returned HTML without team data (initialLineup missing). "
+            "Cookie has likely expired — refresh from Chrome DevTools → "
+            "Network → players request → Cookie header. "
+            "Update HOLDET_COOKIE in .env"
+        )
+
+    # Extract all self.__next_f.push([1, "..."]) payloads
+    chunks = re.findall(
+        r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)',
+        html,
+        re.DOTALL,
+    )
+
+    for chunk in chunks:
+        if "initialLineup" not in chunk:
+            continue
+        try:
+            # Unescape the JSON-encoded string
+            raw = chunk.encode("utf-8").decode("unicode_escape")
+        except (UnicodeDecodeError, ValueError):
+            raw = chunk
+
+        # Find the JSON object containing initialLineup
+        match = re.search(r'\{"fantasyTeamId":\d+.*\}', raw, re.DOTALL)
+        if not match:
+            match = re.search(r'\{.*"initialLineup".*\}', raw, re.DOTALL)
+        if not match:
+            continue
+
+        try:
+            data = json.loads(match.group())
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+        lineup = data.get("initialLineup", [])
+        captain_raw = data.get("initialCaptain")
+        bank = data.get("initialBank", 0)
+
+        # initialCaptain may be the holdet_id directly or an object
+        if isinstance(captain_raw, dict):
+            captain = str(captain_raw.get("id", ""))
+        else:
+            captain = str(captain_raw) if captain_raw is not None else ""
+
+        return {
+            "lineup": lineup,
+            "captain": captain,
+            "bank": int(bank) if bank is not None else 0,
+        }
+
+    raise ValueError(
+        "Could not extract team data from page HTML. "
+        "Found 'initialLineup' text but could not parse the JSON block. "
+        "Check API_NOTES.md for the expected page structure."
+    )
 
 
 def save_riders(riders: list, path: str) -> None:

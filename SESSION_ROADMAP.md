@@ -161,7 +161,7 @@ See SESSION_5_SUMMARY.md.
 
 ---
 
-## Session 6 — CLI Orchestrator + State Management
+## Session 6 — CLI Orchestrator + State Management ✓ COMPLETE (2026-04-17)
 
 **Goal:** `main.py` ties all modules into the daily workflow
 
@@ -173,7 +173,6 @@ python3 main.py ingest --stage N       # fetch riders from API
 python3 main.py brief  --stage N       # run optimizer, generate briefing
 python3 main.py settle --stage N       # record results, update state, check engine
 python3 main.py status                 # show team, bank, rank
-python3 main.py validate --stage N     # compare engine output vs manual input
 ```
 
 **State management:**
@@ -195,6 +194,10 @@ python3 main.py validate --stage N     # compare engine output vs manual input
 
 **Done when:** Full daily workflow runs end-to-end. `brief` produces
 readable output. `settle` updates rider values and bank.
+
+**Result:** 265/265 tests passing. Live `ingest --stage 1` confirmed: 91 riders,
+8-rider team loaded (Vingegaard 17.5M captain Tarozzi, bank 4.5M). `status` working.
+See SESSION_6_SUMMARY.md.
 
 ---
 
