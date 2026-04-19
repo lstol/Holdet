@@ -286,24 +286,33 @@ the last remaining manual input step in the ingestion pipeline.
 
 ---
 
-## Session 9 — TdF Frontend (React + Supabase)
+## Session 9 — Giro 2026 Frontend (React + Supabase) ✓ COMPLETE (2026-04-19)
 
-**Goal:** Shareable web interface for Tour de France
+**Goal:** Shareable web interface for Giro d'Italia 2026
 
-**Stack:** React frontend + Supabase backend + existing Python engine
+**Stack:** Next.js 16 + Tailwind CSS + Supabase + recharts
 
-**Supabase schema mirrors ARCHITECTURE.md section 7.**
+**Supabase project:** `xcmyypnywmqdofukkvga` (eu-west-1)
+**Live URL:** https://holdet.syndikatet.eu (Netlify, Let's Encrypt SSL)
 
-**Pages:**
-1. Briefing — 4-profile table, probability adjustment
-2. My Team — squad, values, captain, bank
-3. History — value chart, Brier score
-4. Riders — full market with filters
+**Part A — Pre-race engine improvements:**
+- `_rider_type()` value-bracket classification (gc/sprinter/specialist/domestique)
+- ANCHOR fixture tests (`TestAnchorRealisticFixtures`, 3 tests)
+- `scripts/fetch_stage_images.py` — downloads Giro stage profile images
 
-**Auth:** Supabase auth for multi-user support (shareable with others)
+**Part C — Frontend (Part B deferred to after Giro start May 9):**
+- 8-table Supabase schema with RLS (user-scoped + shared tables)
+- `scripts/sync_to_supabase.py` — upserts all local state after each CLI command
+- `scripts/keep_alive.py` + `.github/workflows/keep_alive.yml` — prevents free-tier pause
+- 5-page Next.js app: `/briefing`, `/team`, `/history`, `/riders`, `/stages`
+- Gather Intelligence: Anthropic claude-sonnet-4-20250514 + web_search tool
+- Supabase Auth: email/password, multi-user, RLS enforced
 
-**Done when:** Can run full pre-stage workflow from browser.
-Other users can log in and use the tool for their own team.
+**316/316 tests passing. See SESSION_9_SUMMARY.md.**
+
+---
+
+## Session 10 — Live Validation (after Giro start May 9)
 
 ---
 
