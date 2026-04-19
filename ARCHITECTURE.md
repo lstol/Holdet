@@ -269,6 +269,53 @@ def interactive_adjust(
     """
 ```
 
+### scoring/odds.py
+
+```python
+def decimal_to_implied(odds: float) -> float:
+    """Convert decimal odds to raw implied probability: 1 / odds."""
+
+def normalise(implied: dict[str, float]) -> dict[str, float]:
+    """Strip bookmaker overround. Returns same keys, sum = 1.0."""
+
+def odds_to_p_win(raw_odds: dict[str, float]) -> dict[str, float]:
+    """
+    Convert {rider_name_fragment: decimal_odds} outright market
+    → normalised {fragment: p_win}.
+    """
+
+def h2h_to_prob(
+    rider_a: str, odds_a: float,
+    rider_b: str, odds_b: float,
+) -> dict[str, float]:
+    """Convert H2H market → {rider_a: prob_a, rider_b: prob_b}, sum = 1.0."""
+
+def apply_odds_to_probs(
+    probs: dict[str, RiderProb],
+    p_win_map: dict[str, float],
+    riders_by_id: dict[str, Rider],
+) -> dict[str, RiderProb]:
+    """
+    Apply {rider_name_fragment: p_win} onto an existing probs dict.
+    Derives full hierarchy (p_top3, p_top10, p_top15) from p_win.
+    Sets source="odds", model_confidence=0.8, records in manual_overrides.
+    Unmatched riders are unchanged.
+    """
+
+def cli_odds_input(
+    probs: dict[str, RiderProb],
+    stage: Stage,
+    riders: list[Rider],
+    _input_fn=input,
+) -> dict[str, RiderProb]:
+    """
+    Interactive CLI: collect bookmaker odds before interactive_adjust().
+    Outright: <rider fragment> <decimal odds>
+    H2H:      h2h <rider_a> <odds_a> vs <rider_b> <odds_b>
+    'skip' returns probs unchanged. 'done' applies and returns.
+    """
+```
+
 ### scoring/simulator.py
 
 ```python

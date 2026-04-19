@@ -273,24 +273,16 @@ Session 5 live probe (pre-race) found:
 Priority: confirm whether `/standings` provides GC data, as this would eliminate
 the last remaining manual input step in the ingestion pipeline.
 
-### Session 8 addition: Odds-based probability inputs
+### Session 8 addition: Odds-based probability inputs ✓ DONE
 
-Improve prior generation by replacing flat heuristics with betting-odds-derived
-probabilities. Two input types are available:
+`scoring/odds.py` — bookmaker odds → normalised implied probabilities.
 
-1. Outright win odds — seed p_win and p_top3 for top 10-15 riders per stage
-2. Head-to-head odds — refine relative ordering between rider pairs, especially
-   useful for sprinters and climbers where outright market is shallow
+- `decimal_to_implied`, `normalise`, `odds_to_p_win`, `h2h_to_prob`
+- `apply_odds_to_probs` — patches probs dict, derives full hierarchy, sets source="odds"
+- `cli_odds_input` — interactive CLI: outright + H2H entry before `interactive_adjust()`
+- `--odds` flag on `python3 main.py brief` activates the odds input step
 
-Workflow to implement:
-- Small CLI that accepts (rider_fragment, odds) pairs and converts to implied
-  probabilities (1/odds, normalised to remove bookmaker overround)
-- H2H pairs can be chained to build consistent probability ladder across a group
-- Output feeds directly into interactive_adjust() as pre-filled starting point
-  rather than flat model priors
-- User reviews and confirms before saving to state.json
-
-This is the single highest-impact probability model improvement available.
+16 new tests. 310/310 passing. See SESSION_8_SUMMARY.md.
 
 ---
 

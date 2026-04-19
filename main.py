@@ -23,6 +23,7 @@ from scoring.engine import (
     Rider, Stage, StageResult, SprintPoint, KOMPoint, score_rider,
 )
 from scoring.probabilities import generate_priors, interactive_adjust, save_probs
+from scoring.odds import cli_odds_input
 from scoring.simulator import simulate_team
 from scoring.optimizer import (
     optimize_all_profiles, suggest_profile, format_briefing_table,
@@ -313,7 +314,9 @@ def cmd_brief(args) -> None:
     # 1. Generate model priors
     probs = generate_priors(riders, stage)
 
-    # 2. Interactive adjustment
+    # 2. Optional odds input, then interactive adjustment
+    if getattr(args, "odds", False):
+        probs = cli_odds_input(probs, stage, riders)
     probs = interactive_adjust(probs, stage, riders)
 
     # 3. Simulate team only (fast preview)
@@ -712,6 +715,7 @@ def main() -> None:
     # brief
     p_brief = sub.add_parser("brief", help="Generate pre-stage briefing")
     p_brief.add_argument("--stage", type=int, required=True, help="Upcoming stage number")
+    p_brief.add_argument("--odds", action="store_true", help="Collect bookmaker odds before probability adjustment")
 
     # settle
     p_settle = sub.add_parser("settle", help="Record stage results and update state")
