@@ -525,23 +525,37 @@ manual adjustments are adding value going into TdF.
 
 ## 7. Frontend Architecture (Session 9 — TdF)
 
-**Stack:** React + Supabase + existing Python backend
+**Stack:** React + Tailwind + Supabase + Supabase Auth + existing Python backend
 
-**Supabase tables mirror state.json:**
-- `game_state` — one row per race (giro/tdf)
-- `riders` — full roster with current values
-- `stages` — stage metadata
-- `stage_results` — post-stage actuals
-- `prob_snapshots` — model + manual probs per stage
-- `value_history` — per-rider value deltas per stage
+**Supabase tables:**
+- `game_state` — one row per race per user (giro/tdf)
+- `riders` — full roster with current values (user-scoped)
+- `stages` — stage metadata (shared, read-only)
+- `stage_results` — post-stage actuals (shared, read-only)
+- `prob_snapshots` — model + manual probs per stage (user-scoped)
+- `value_history` — per-rider value deltas per stage (user-scoped)
+- `brier_history` — ProbAccuracy records per stage (user-scoped)
+- `intelligence_log` — per-stage Gather Intelligence output (user-scoped)
+- `keep_alive_log` — timestamp-only ping log to prevent Supabase project pausing
+
+**Row Level Security:** All user-scoped tables filtered by `auth.uid()`.
+Shared tables (stages, stage_results) are read-only for all authenticated users.
+
+**Sync:** `scripts/sync_to_supabase.py` upserts from state.json after each
+ingest, settle, and brief. Frontend is read-only — all writes go through CLI.
+
+**Keep-alive:** `scripts/keep_alive.py` pings Supabase every 5 days via cron
+or GitHub Actions to prevent free-tier project pausing.
 
 **Frontend pages:**
-1. **Briefing** — pre-stage 4-profile recommendation table
-2. **My Team** — current squad, values, captain indicator
+1. **Briefing** — pre-stage 4-profile recommendation table + Gather Intelligence
+2. **My Team** — current squad, values, captain indicator, bank balance
 3. **History** — value over time chart, Brier score tracking
-4. **Riders** — full rider market with filters (team, price range, type)
+4. **Riders** — full rider market with filters (team, price range, status)
+5. **Stages** — all 21 stages with profile images, sprint/KOM detail
 
-**Shareable:** Other participants can log in and use the same tool.
+**Auth:** Supabase email/password auth. Each user manages their own team.
+Other participants sign up and use the tool independently for their own Holdet team.
 Game ID is the only parameter that changes between competitions.
 
 ---
