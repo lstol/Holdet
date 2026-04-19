@@ -27,6 +27,10 @@ from scoring.simulator import simulate_team
 from scoring.optimizer import (
     optimize_all_profiles, suggest_profile, format_briefing_table,
 )
+from output.report import BriefingOutput, format_briefing, format_status
+from output.tracker import (
+    record_stage_accuracy, format_brier_summary, save_accuracy,
+)
 
 
 # ── State helpers ─────────────────────────────────────────────────────────────
@@ -81,15 +85,19 @@ def _load_stage(stages_path: str, stage_number: int) -> Stage:
     with open(stages_path, encoding="utf-8") as fh:
         stages_data = json.load(fh)
 
-    # Support list or dict keyed by "number"
+    # Support list, {"stages": [...]} dict, or legacy dict-of-values
     if isinstance(stages_data, list):
         stages_list = stages_data
+    elif isinstance(stages_data, dict) and "stages" in stages_data:
+        stages_list = stages_data["stages"]
     elif isinstance(stages_data, dict):
-        stages_list = list(stages_data.values())
+        stages_list = [v for v in stages_data.values() if isinstance(v, dict)]
     else:
         raise ValueError(f"Unexpected stages.json format: {type(stages_data)}")
 
     for s in stages_list:
+        if not isinstance(s, dict):
+            continue
         if s.get("number") == stage_number:
             sprint_points = [
                 SprintPoint(
@@ -342,15 +350,29 @@ def cmd_brief(args) -> None:
         stages_remaining=stages_remaining,
     )
 
-    # 6. Briefing table
-    print("\n" + format_briefing_table(recommendations, rider_map, stage))
-
-    # 7. Suggested profile
+    # 6. Build BriefingOutput and render with format_briefing
+    current_team_ev = sum(
+        team_sims[rid].expected_value for rid in my_team if rid in team_sims
+    )
+    suggested_profile = None
+    suggested_reason = "No rank data — defaulting to BALANCED"
     if rank and total:
-        suggested, reason = suggest_profile(rank, total, stages_remaining)
-        print(f"\nSuggested: {suggested.name} — {reason}")
+        suggested_profile, suggested_reason = suggest_profile(rank, total, stages_remaining)
 
-    # 8. Save probs to state for audit trail
+    briefing_output = BriefingOutput(
+        stage=stage,
+        my_team=my_team,
+        captain=captain,
+        riders=riders,
+        probs=probs,
+        current_team_ev=current_team_ev,
+        suggested_profile=suggested_profile,
+        suggested_profile_reason=suggested_reason,
+        profiles=recommendations,
+    )
+    print("\n" + format_briefing(briefing_output, state))
+
+    # 7. Save probs to state for audit trail
     probs_dict = {
         rid: {
             "p_win": rp.p_win,
@@ -615,6 +637,29 @@ def cmd_settle(args) -> None:
         except ValueError:
             pass
 
+    # Brier score tracking
+    stage_probs_raw = state.get("probs_by_stage", {}).get(str(args.stage), {})
+    if stage_probs_raw:
+        from scoring.probabilities import RiderProb
+        stage_probs = {
+            rid: RiderProb(
+                rider_id=rid,
+                stage_number=args.stage,
+                p_win=d.get("p_win", 0.0),
+                p_top3=d.get("p_top3", 0.0),
+                p_top10=d.get("p_top10", 0.0),
+                p_top15=d.get("p_top15", 0.0),
+                p_dnf=d.get("p_dnf", 0.0),
+                source=d.get("source", "model"),
+            )
+            for rid, d in stage_probs_raw.items()
+        }
+        accuracy_records = record_stage_accuracy(args.stage, stage_probs, result, state)
+        state = save_accuracy(accuracy_records, state)
+        print("\n" + format_brier_summary(accuracy_records))
+    else:
+        print("\n  (No saved probs for this stage — skipping Brier tracking)")
+
     # Update state
     state["bank"] = new_bank
     state["current_stage"] = args.stage
@@ -647,57 +692,8 @@ def cmd_status(args) -> None:
     state_path = config.get_state_path()
 
     state = _load_state(state_path)
-    my_team = state.get("my_team", [])
-    captain = state.get("captain")
-    bank = state.get("bank", config.INITIAL_BUDGET)
-    rank = state.get("rank")
-    total = state.get("total_participants")
-    stage = state.get("current_stage", 0)
-    stages_done = len(state.get("stages_completed", []))
-
-    print(f"\n=== Holdet Status ===")
-    print(f"Stage: {stage} / {config.TOTAL_STAGES}  ({stages_done} settled)")
-    print(f"Bank:  {bank/1e6:.3f}M")
-    if rank:
-        rank_str = f"Rank: {rank:,}"
-        if total:
-            rank_str += f" / {total:,}"
-        print(rank_str)
-
-    if not my_team:
-        print("\nNo team loaded. Run: python3 main.py ingest --stage N")
-        return
-
-    if os.path.exists(riders_path):
-        riders = load_riders(riders_path)
-        rider_map = {r.holdet_id: r for r in riders}
-    else:
-        rider_map = {}
-
-    print(f"\nYour team ({len(my_team)} riders):")
-    dns_alerts = []
-    for rid in my_team:
-        r = rider_map.get(rid)
-        if r:
-            cap_mark = " [C]" if rid == captain else "    "
-            value_str = f"{r.value/1e6:.2f}M"
-            if r.start_value:
-                delta = r.value - r.start_value
-                value_str += f"  ({delta:+,})"
-            dns_mark = " *** DNS ***" if r.status == "dns" else ""
-            print(f"  {cap_mark} {r.name:<30} {r.team_abbr:<6} {value_str}{dns_mark}")
-            if r.status == "dns":
-                stages_left = config.TOTAL_STAGES - stage
-                penalty = stages_left * -100_000
-                dns_alerts.append(
-                    f"  ALERT: {r.name} DNS — remaining penalty {penalty:,} "
-                    f"({stages_left} stages)"
-                )
-        else:
-            print(f"       holdet_id={rid} (not found in riders.json)")
-
-    if dns_alerts:
-        print("\n" + "\n".join(dns_alerts))
+    riders = load_riders(riders_path) if os.path.exists(riders_path) else []
+    print("\n" + format_status(state, riders))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
