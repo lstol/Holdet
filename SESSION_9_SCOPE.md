@@ -286,6 +286,8 @@ No two-way sync — avoids conflicts between CLI state and UI state.
 - Mobile layout works on iPhone screen
 - Briefing page usable end-to-end: intelligence → probability table → profile recommendation
 - sync_to_supabase.py runs cleanly after settle and brief
+- Auth working: other users can sign up, log in, and use the tool for their own team
+- Keep-alive ping deployed (cron or GitHub Actions)
 - Deployed (Vercel or similar) so accessible from phone during race
 
 ---
@@ -293,7 +295,6 @@ No two-way sync — avoids conflicts between CLI state and UI state.
 ## Do Not Build in Session 9
 
 - Automated trading on Holdet (never)
-- Multi-user auth (Session 10 if needed)
 - Push notifications for DNS alerts (Session 10)
 
 ---
