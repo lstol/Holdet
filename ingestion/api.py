@@ -4,6 +4,12 @@ ingestion/api.py — Live rider data from the Holdet API.
 Primary data source. Confirmed working endpoint:
   GET https://nexus-app-fantasy-fargate.holdet.dk/api/games/{game_id}/players
 
+Authentication: email/password via NextAuth credentials provider.
+  1. GET  https://www.holdet.dk/api/auth/csrf          → csrfToken
+  2. POST https://www.holdet.dk/api/auth/signin/credentials → session cookies
+  3. GET  https://nexus-app-fantasy-fargate.holdet.dk/api/session → confirm valid
+  On 401: re-authenticates automatically and retries once.
+
 One call returns:
   items[]              — all riders with prices and status
   _embedded.persons{}  — rider names keyed by personId
@@ -20,7 +26,6 @@ from __future__ import annotations
 
 import json
 import logging
-import warnings
 from dataclasses import asdict, fields
 from typing import Optional
 
@@ -30,10 +35,158 @@ from scoring.engine import Rider
 
 logger = logging.getLogger(__name__)
 
+_HOLDET_URL = "https://www.holdet.dk"
 _BASE_URL = "https://nexus-app-fantasy-fargate.holdet.dk"
+_SESSION_CONFIRM_URL = f"{_BASE_URL}/api/session"
+
+# Module-level session cache — call _reset_session() to force re-authentication.
+_cached_session: Optional[requests.Session] = None
 
 
-def fetch_riders(game_id: str, cookie: str) -> list:
+# ── Authentication ─────────────────────────────────────────────────────────────
+
+def login(email: str, password: str) -> requests.Session:
+    """
+    Authenticate with Holdet using email/password (NextAuth credentials).
+
+    Step 1: GET /api/auth/csrf → csrfToken
+    Step 2: POST /api/auth/signin/credentials with {email, password, csrfToken}
+    Step 3: GET /api/session to confirm the session is valid
+
+    Returns
+    -------
+    requests.Session
+        Session with auth cookies set. Reuse for all subsequent calls.
+
+    Raises
+    ------
+    PermissionError
+        On 401/403 — wrong email or password, or confirmation failed.
+    ConnectionError
+        On network failures.
+    """
+    session = requests.Session()
+
+    # Step 1 — CSRF token
+    try:
+        csrf_resp = session.get(f"{_HOLDET_URL}/api/auth/csrf", timeout=30)
+    except requests.exceptions.ConnectionError as exc:
+        raise ConnectionError(f"Network error fetching CSRF token: {exc}") from exc
+    except requests.exceptions.Timeout:
+        raise ConnectionError("Request timed out fetching CSRF token")
+    csrf_resp.raise_for_status()
+    csrf_token = csrf_resp.json()["csrfToken"]
+
+    # Step 2 — Sign in
+    try:
+        signin_resp = session.post(
+            f"{_HOLDET_URL}/api/auth/signin/credentials",
+            json={
+                "email": email,
+                "password": password,
+                "csrfToken": csrf_token,
+                "redirect": False,
+            },
+            timeout=30,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise ConnectionError(f"Network error during sign-in: {exc}") from exc
+    except requests.exceptions.Timeout:
+        raise ConnectionError("Request timed out during sign-in")
+
+    if signin_resp.status_code in (401, 403):
+        raise PermissionError(
+            "Holdet login failed — wrong email or password. "
+            "Check HOLDET_EMAIL and HOLDET_PASSWORD in .env"
+        )
+    signin_resp.raise_for_status()
+
+    # Step 3 — Confirm session is valid
+    try:
+        confirm_resp = session.get(_SESSION_CONFIRM_URL, timeout=30)
+    except requests.exceptions.ConnectionError as exc:
+        raise ConnectionError(f"Network error confirming session: {exc}") from exc
+    except requests.exceptions.Timeout:
+        raise ConnectionError("Request timed out confirming session")
+
+    if confirm_resp.status_code in (401, 403):
+        raise PermissionError(
+            "Login appeared to succeed but session confirmation failed. "
+            "Check HOLDET_EMAIL and HOLDET_PASSWORD in .env"
+        )
+    confirm_resp.raise_for_status()
+
+    return session
+
+
+def get_session() -> requests.Session:
+    """
+    Return the cached authenticated session, creating one if needed.
+
+    Credentials from HOLDET_EMAIL and HOLDET_PASSWORD environment variables.
+    Call _reset_session() to force re-authentication on the next call.
+
+    Raises
+    ------
+    PermissionError
+        If login fails (wrong credentials).
+    EnvironmentError
+        If HOLDET_EMAIL or HOLDET_PASSWORD are not set.
+    """
+    global _cached_session
+    if _cached_session is None:
+        import config as _config
+        _cached_session = login(_config.get_email(), _config.get_password())
+    return _cached_session
+
+
+def _reset_session() -> None:
+    """Clear the cached session so the next get_session() call re-authenticates."""
+    global _cached_session
+    _cached_session = None
+
+
+def _get_with_retry(session: requests.Session, url: str) -> requests.Response:
+    """
+    Perform a GET. On 401, reset cached session, re-login, retry once.
+    Two consecutive 401s raise PermissionError.
+    403 raises PermissionError immediately (no retry).
+    Raises ConnectionError on network failures.
+    """
+    try:
+        resp = session.get(url, timeout=30)
+    except requests.exceptions.ConnectionError as exc:
+        raise ConnectionError(f"Network error fetching {url}: {exc}") from exc
+    except requests.exceptions.Timeout:
+        raise ConnectionError(f"Request timed out fetching {url}")
+
+    if resp.status_code == 401:
+        # Re-authenticate once and retry
+        _reset_session()
+        retry_session = get_session()
+        try:
+            resp = retry_session.get(url, timeout=30)
+        except requests.exceptions.ConnectionError as exc:
+            raise ConnectionError(f"Network error on retry: {exc}") from exc
+        if resp.status_code == 401:
+            raise PermissionError(
+                "Authentication failed after re-login attempt. "
+                "Check HOLDET_EMAIL and HOLDET_PASSWORD in .env"
+            )
+
+    if resp.status_code == 403:
+        raise PermissionError(
+            "Access denied (403). "
+            "Check HOLDET_EMAIL and HOLDET_PASSWORD in .env"
+        )
+
+    resp.raise_for_status()
+    return resp
+
+
+# ── Rider data ─────────────────────────────────────────────────────────────────
+
+def fetch_riders(game_id: str, session: Optional[requests.Session] = None) -> list:
     """
     Fetch all riders for the given game from the Holdet API.
 
@@ -41,9 +194,9 @@ def fetch_riders(game_id: str, cookie: str) -> list:
     ----------
     game_id : str
         Holdet game ID, e.g. "612" for Giro 2026.
-    cookie : str
-        Full session cookie string from a logged-in browser.
-        Refresh from Chrome DevTools → Network → players request → Cookie header.
+    session : requests.Session, optional
+        Authenticated session. If None, uses get_session() (auto-login).
+        Pass an explicit session in tests to inject a mock.
 
     Returns
     -------
@@ -54,32 +207,15 @@ def fetch_riders(game_id: str, cookie: str) -> list:
     Raises
     ------
     PermissionError
-        On HTTP 401/403 — cookie has expired.
+        On 401 (after retry) or 403 — authentication failed.
     ConnectionError
         On network-level failures.
     """
+    if session is None:
+        session = get_session()
     url = f"{_BASE_URL}/api/games/{game_id}/players"
-    try:
-        response = requests.get(url, headers={"Cookie": cookie}, timeout=30)
-    except requests.exceptions.ConnectionError as exc:
-        raise ConnectionError(
-            f"Network error fetching riders from {url}: {exc}"
-        ) from exc
-    except requests.exceptions.Timeout as exc:
-        raise ConnectionError(
-            f"Request timed out fetching riders from {url}"
-        ) from exc
-
-    if response.status_code in (401, 403):
-        raise PermissionError(
-            "Cookie expired. Refresh from Chrome DevTools → "
-            "Network → players request → Cookie header. "
-            "Update HOLDET_COOKIE in .env"
-        )
-    response.raise_for_status()
-
-    data = response.json()
-    return _parse_players_response(data)
+    response = _get_with_retry(session, url)
+    return _parse_players_response(response.json())
 
 
 def _parse_players_response(data: dict) -> list:
@@ -182,7 +318,8 @@ def probe_extra_endpoints(game_id: str, cookie: str) -> dict:
     return results
 
 
-def fetch_my_team(fantasy_team_id: str, cartridge: str, cookie: str) -> dict:
+def fetch_my_team(fantasy_team_id: str, cartridge: str,
+                  session: Optional[requests.Session] = None) -> dict:
     """
     Fetch current team state by scraping the Next.js HTML team page.
 
@@ -195,8 +332,8 @@ def fetch_my_team(fantasy_team_id: str, cartridge: str, cookie: str) -> dict:
         e.g. "6796783"
     cartridge : str
         e.g. "giro-d-italia-2026"
-    cookie : str
-        Full session cookie string.
+    session : requests.Session, optional
+        Authenticated session. If None, uses get_session() (auto-login).
 
     Returns
     -------
@@ -207,26 +344,14 @@ def fetch_my_team(fantasy_team_id: str, cartridge: str, cookie: str) -> dict:
 
     Raises
     ------
-    PermissionError  — 401/403 or page missing initialLineup (expired cookie)
+    PermissionError  — 401/403 or page missing initialLineup (session expired)
     ConnectionError  — network failure
     ValueError       — page parsed but expected keys not found
     """
+    if session is None:
+        session = get_session()
     url = f"{_BASE_URL}/da/{cartridge}/me/fantasyteams/{fantasy_team_id}"
-    try:
-        response = requests.get(url, headers={"Cookie": cookie}, timeout=30)
-    except requests.exceptions.ConnectionError as exc:
-        raise ConnectionError(f"Network error fetching team page: {exc}") from exc
-    except requests.exceptions.Timeout as exc:
-        raise ConnectionError("Request timed out fetching team page") from exc
-
-    if response.status_code in (401, 403):
-        raise PermissionError(
-            "Cookie expired. Refresh from Chrome DevTools → "
-            "Network → players request → Cookie header. "
-            "Update HOLDET_COOKIE in .env"
-        )
-    response.raise_for_status()
-
+    response = _get_with_retry(session, url)
     return _parse_my_team_html(response.text)
 
 
@@ -244,9 +369,7 @@ def _parse_my_team_html(html: str) -> dict:
     if "initialLineup" not in html:
         raise PermissionError(
             "Team page returned HTML without team data (initialLineup missing). "
-            "Cookie has likely expired — refresh from Chrome DevTools → "
-            "Network → players request → Cookie header. "
-            "Update HOLDET_COOKIE in .env"
+            "Session may have expired — will re-authenticate on next request."
         )
 
     # Extract all self.__next_f.push([1, "..."]) payloads

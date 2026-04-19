@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import requests as _requests
+
 from ingestion.api import (
     _parse_players_response,
     fetch_riders,
@@ -196,61 +198,61 @@ class TestParsePlayersResponse:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TestFetchRiders — HTTP layer (mocked)
+# TestFetchRiders — HTTP layer (session mock)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestFetchRiders:
-    def _mock_response(self, status_code=200, json_data=None):
-        mock = MagicMock()
-        mock.status_code = status_code
-        mock.json.return_value = json_data or SAMPLE_RESPONSE
-        mock.headers = {"content-type": "application/json"}
-        mock.raise_for_status = MagicMock()
-        return mock
+    def _mock_session(self, status_code=200, json_data=None):
+        """Create a mock requests.Session whose .get() returns a mock response."""
+        session = MagicMock()
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.json.return_value = json_data or SAMPLE_RESPONSE
+        resp.raise_for_status = MagicMock()
+        session.get.return_value = resp
+        return session
 
     def test_returns_list_of_rider(self):
-        with patch("requests.get", return_value=self._mock_response()) as _:
-            riders = fetch_riders("612", "session=abc123")
+        session = self._mock_session()
+        riders = fetch_riders("612", session=session)
         assert isinstance(riders, list)
         assert all(isinstance(r, Rider) for r in riders)
 
     def test_correct_url_called(self):
-        with patch("requests.get", return_value=self._mock_response()) as mock_get:
-            fetch_riders("612", "session=abc123")
-        call_url = mock_get.call_args[0][0]
+        session = self._mock_session()
+        fetch_riders("612", session=session)
+        call_url = session.get.call_args[0][0]
         assert "api/games/612/players" in call_url
 
-    def test_cookie_sent_in_header(self):
-        with patch("requests.get", return_value=self._mock_response()) as mock_get:
-            fetch_riders("612", "session=abc123")
-        headers = mock_get.call_args[1]["headers"]
-        assert headers["Cookie"] == "session=abc123"
+    def test_session_get_called(self):
+        session = self._mock_session()
+        fetch_riders("612", session=session)
+        assert session.get.called
 
-    def test_401_raises_permission_error(self):
-        mock = self._mock_response(status_code=401)
-        mock.raise_for_status = MagicMock()
-        with patch("requests.get", return_value=mock):
-            with pytest.raises(PermissionError) as exc_info:
-                fetch_riders("612", "expired_cookie")
-        assert "Cookie expired" in str(exc_info.value)
-        assert "DevTools" in str(exc_info.value)
+    def test_401_triggers_retry_and_raises_on_second_401(self):
+        """First 401 resets session and retries; second 401 raises PermissionError."""
+        first_session = self._mock_session(status_code=401)
+        second_session = self._mock_session(status_code=401)
+        with patch("ingestion.api.get_session", return_value=second_session):
+            with patch("ingestion.api._reset_session"):
+                with pytest.raises(PermissionError, match="Authentication failed after re-login"):
+                    fetch_riders("612", session=first_session)
 
     def test_403_raises_permission_error(self):
-        mock = self._mock_response(status_code=403)
-        mock.raise_for_status = MagicMock()
-        with patch("requests.get", return_value=mock):
-            with pytest.raises(PermissionError):
-                fetch_riders("612", "bad_cookie")
+        """403 raises PermissionError immediately without retry."""
+        session = self._mock_session(status_code=403)
+        with pytest.raises(PermissionError):
+            fetch_riders("612", session=session)
 
     def test_network_error_raises_connection_error(self):
-        import requests as req
-        with patch("requests.get", side_effect=req.exceptions.ConnectionError("timeout")):
-            with pytest.raises(ConnectionError):
-                fetch_riders("612", "session=abc")
+        session = MagicMock()
+        session.get.side_effect = _requests.exceptions.ConnectionError("timeout")
+        with pytest.raises(ConnectionError):
+            fetch_riders("612", session=session)
 
     def test_count_matches_fixture(self):
-        with patch("requests.get", return_value=self._mock_response()):
-            riders = fetch_riders("612", "session=abc123")
+        session = self._mock_session()
+        riders = fetch_riders("612", session=session)
         assert len(riders) == len(SAMPLE_RESPONSE["items"])
 
 

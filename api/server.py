@@ -28,7 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import config
-from ingestion.api import fetch_riders, fetch_my_team, save_riders, load_riders
+from ingestion.api import get_session, fetch_riders, fetch_my_team, save_riders, load_riders
 from scoring.engine import (
     Rider, Stage, StageResult, SprintPoint, KOMPoint, score_rider,
 )
@@ -253,15 +253,15 @@ def get_status() -> dict:
 def post_ingest() -> dict:
     """Fetch latest riders + team from Holdet API. Updates state.json and riders.json."""
     try:
-        cookie = config.get_cookie()
+        session = get_session()
         game_id = config.get_game_id()
         fantasy_team_id = config.get_fantasy_team_id()
         cartridge = config.get_cartridge()
-    except EnvironmentError as exc:
+    except (EnvironmentError, PermissionError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
     try:
-        riders = fetch_riders(game_id, cookie)
+        riders = fetch_riders(game_id, session=session)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Holdet API error: {exc}")
 
@@ -274,7 +274,7 @@ def post_ingest() -> dict:
     my_team_ids: list[str] = []
 
     try:
-        team_data = fetch_my_team(fantasy_team_id, cartridge, cookie)
+        team_data = fetch_my_team(fantasy_team_id, cartridge, session=session)
         lineup = team_data.get("lineup", [])
         for player in lineup:
             pid = str(player.get("id", ""))
@@ -525,6 +525,26 @@ def post_settle(req: SettleRequest) -> dict:
     state["bank"] = new_bank
     state["current_stage"] = req.stage
     state["stages_completed"] = list(set(state.get("stages_completed", []) + [req.stage]))
+
+    # Save result history for validate command
+    stage_key = f"stage_{req.stage}"
+    state.setdefault("result_history", {})[stage_key] = {
+        "stage_number": result.stage_number,
+        "finish_order": result.finish_order,
+        "times_behind_winner": result.times_behind_winner,
+        "sprint_point_winners": result.sprint_point_winners,
+        "kom_point_winners": result.kom_point_winners,
+        "jersey_winners": result.jersey_winners,
+        "most_aggressive": result.most_aggressive,
+        "dnf_riders": result.dnf_riders,
+        "dns_riders": result.dns_riders,
+        "disqualified": result.disqualified,
+        "ttt_team_order": result.ttt_team_order,
+        "gc_standings": result.gc_standings,
+    }
+    state.setdefault("value_snapshot", {})[stage_key] = {
+        rid: rider_map[rid].value for rid in my_team if rid in rider_map
+    }
 
     # Update rider values in riders.json
     for rid in my_team:

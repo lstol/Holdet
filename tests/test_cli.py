@@ -63,7 +63,8 @@ class TestConfig(unittest.TestCase):
     def test_defaults(self):
         import config
         with patch.dict(os.environ, {
-            "HOLDET_COOKIE": "x",
+            "HOLDET_EMAIL": "test@example.com",
+            "HOLDET_PASSWORD": "pass",
             "HOLDET_GAME_ID": "612",
             "HOLDET_FANTASY_TEAM_ID": "999",
             "HOLDET_CARTRIDGE": "giro-2026",
@@ -72,15 +73,21 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.get_riders_path(), "data/riders.json")
             self.assertEqual(config.get_stages_path(), "data/stages.json")
 
-    def test_missing_required_raises(self):
+    def test_missing_email_raises(self):
         import config
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(EnvironmentError):
-                config.get_cookie()
+                config.get_email()
+
+    def test_missing_password_raises(self):
+        import config
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(EnvironmentError):
+                config.get_password()
 
     def test_missing_game_id_raises(self):
         import config
-        with patch.dict(os.environ, {"HOLDET_COOKIE": "x"}, clear=True):
+        with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(EnvironmentError):
                 config.get_game_id()
 
@@ -167,61 +174,64 @@ class TestParseMyTeamHtml(unittest.TestCase):
 # ── TestFetchMyTeam ───────────────────────────────────────────────────────────
 
 class TestFetchMyTeam(unittest.TestCase):
-    def _mock_response(self, status_code=200, text=None):
-        mock = MagicMock()
-        mock.status_code = status_code
-        mock.text = text or _SAMPLE_HTML
-        mock.raise_for_status = MagicMock()
-        return mock
+    def _mock_session(self, status_code=200, text=None):
+        """Create a mock session whose .get() returns a mock response."""
+        import requests as _req
+        session = MagicMock(spec=_req.Session)
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.text = text or _SAMPLE_HTML
+        resp.raise_for_status = MagicMock()
+        if status_code >= 400:
+            resp.raise_for_status.side_effect = _req.exceptions.HTTPError()
+        session.get.return_value = resp
+        return session
 
-    @patch("ingestion.api.requests.get")
-    def test_returns_dict_with_lineup_captain_bank(self, mock_get):
-        mock_get.return_value = self._mock_response()
+    def test_returns_dict_with_lineup_captain_bank(self):
         from ingestion.api import fetch_my_team
-        result = fetch_my_team("6796783", "giro-d-italia-2026", "cookie=abc")
+        session = self._mock_session()
+        result = fetch_my_team("6796783", "giro-d-italia-2026", session=session)
         self.assertIn("lineup", result)
         self.assertIn("captain", result)
         self.assertIn("bank", result)
 
-    @patch("ingestion.api.requests.get")
-    def test_url_contains_cartridge_and_team_id(self, mock_get):
-        mock_get.return_value = self._mock_response()
+    def test_url_contains_cartridge_and_team_id(self):
         from ingestion.api import fetch_my_team
-        fetch_my_team("6796783", "giro-d-italia-2026", "cookie=abc")
-        url = mock_get.call_args[0][0]
+        session = self._mock_session()
+        fetch_my_team("6796783", "giro-d-italia-2026", session=session)
+        url = session.get.call_args[0][0]
         self.assertIn("giro-d-italia-2026", url)
         self.assertIn("6796783", url)
 
-    @patch("ingestion.api.requests.get")
-    def test_cookie_in_headers(self, mock_get):
-        mock_get.return_value = self._mock_response()
+    def test_session_get_called(self):
         from ingestion.api import fetch_my_team
-        fetch_my_team("6796783", "giro-d-italia-2026", "session=abc123")
-        headers = mock_get.call_args[1]["headers"]
-        self.assertIn("Cookie", headers)
-        self.assertEqual(headers["Cookie"], "session=abc123")
+        session = self._mock_session()
+        fetch_my_team("6796783", "giro-d-italia-2026", session=session)
+        self.assertTrue(session.get.called)
 
-    @patch("ingestion.api.requests.get")
-    def test_401_raises_permission_error(self, mock_get):
-        mock_get.return_value = self._mock_response(status_code=401)
+    def test_401_raises_permission_error(self):
         from ingestion.api import fetch_my_team
+        from unittest.mock import patch
+        first_session = self._mock_session(status_code=401)
+        second_session = self._mock_session(status_code=401)
+        with patch("ingestion.api.get_session", return_value=second_session), \
+             patch("ingestion.api._reset_session"):
+            with self.assertRaises(PermissionError):
+                fetch_my_team("123", "giro", session=first_session)
+
+    def test_403_raises_permission_error(self):
+        from ingestion.api import fetch_my_team
+        session = self._mock_session(status_code=403)
         with self.assertRaises(PermissionError):
-            fetch_my_team("123", "giro", "cookie")
+            fetch_my_team("123", "giro", session=session)
 
-    @patch("ingestion.api.requests.get")
-    def test_403_raises_permission_error(self, mock_get):
-        mock_get.return_value = self._mock_response(status_code=403)
+    def test_network_failure_raises_connection_error(self):
         from ingestion.api import fetch_my_team
-        with self.assertRaises(PermissionError):
-            fetch_my_team("123", "giro", "cookie")
-
-    @patch("ingestion.api.requests.get")
-    def test_network_failure_raises_connection_error(self, mock_get):
-        import requests
-        mock_get.side_effect = requests.exceptions.ConnectionError("net err")
-        from ingestion.api import fetch_my_team
+        import requests as _req
+        session = MagicMock(spec=_req.Session)
+        session.get.side_effect = _req.exceptions.ConnectionError("net err")
         with self.assertRaises(ConnectionError):
-            fetch_my_team("123", "giro", "cookie")
+            fetch_my_team("123", "giro", session=session)
 
 
 # ── TestStateSaveLoad ─────────────────────────────────────────────────────────

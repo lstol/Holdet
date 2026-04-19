@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Optional
 
 import config
-from ingestion.api import fetch_riders, fetch_my_team, save_riders, load_riders
+from ingestion.api import get_session, fetch_riders, fetch_my_team, save_riders, load_riders
 from scoring.engine import (
     Rider, Stage, StageResult, SprintPoint, KOMPoint, score_rider,
 )
@@ -201,8 +201,8 @@ def _resolve_kv_list(raw: str, rider_map: dict) -> dict:
 
 def _log_mismatch(stage_number: int, rider_name: str, field: str,
                   expected: int, actual: int, notes: str = "") -> None:
-    """Append a validation mismatch to tests/validation_log.md."""
-    log_path = "tests/validation_log.md"
+    """Append a validation mismatch to validation_log.md."""
+    log_path = os.getenv("VALIDATION_LOG_PATH", "tests/validation_log.md")
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     line = (
         f"| {ts} | Stage {stage_number} | {rider_name} | {field} "
@@ -223,7 +223,6 @@ def _log_mismatch(stage_number: int, rider_name: str, field: str,
 
 def cmd_ingest(args) -> None:
     """Fetch riders and team from Holdet API, update state."""
-    cookie = config.get_cookie()
     game_id = config.get_game_id()
     fantasy_team_id = config.get_fantasy_team_id()
     cartridge = config.get_cartridge()
@@ -231,7 +230,8 @@ def cmd_ingest(args) -> None:
     state_path = config.get_state_path()
 
     print(f"Fetching riders for game {game_id}...")
-    riders = fetch_riders(game_id, cookie)
+    session = get_session()
+    riders = fetch_riders(game_id, session=session)
     print(f"  {len(riders)} riders fetched.")
 
     save_riders(riders, riders_path)
@@ -242,7 +242,7 @@ def cmd_ingest(args) -> None:
 
     print("Fetching your team...")
     try:
-        team_data = fetch_my_team(fantasy_team_id, cartridge, cookie)
+        team_data = fetch_my_team(fantasy_team_id, cartridge, session=session)
         lineup = team_data.get("lineup", [])
         captain_raw = team_data.get("captain", "")
         bank = team_data.get("bank", 0)
@@ -281,7 +281,7 @@ def cmd_ingest(args) -> None:
 
     except PermissionError as exc:
         print(f"\nWarning: Could not fetch team — {exc}", file=sys.stderr)
-        print("Riders saved. Update HOLDET_COOKIE in .env and re-run ingest.", file=sys.stderr)
+        print("Riders saved. Check HOLDET_EMAIL and HOLDET_PASSWORD in .env and re-run ingest.", file=sys.stderr)
 
     _save_state(state, state_path)
     print(f"\nState saved to {state_path}")
@@ -557,6 +557,9 @@ def cmd_settle(args) -> None:
         gc_standings=gc_standings,
     )
 
+    # Snapshot rider values before this stage (for validate command)
+    value_snapshot = {rid: rider_map[rid].value for rid in my_team if rid in rider_map}
+
     # Score all team riders
     all_riders_dict = {r.holdet_id: r for r in riders}
     print(f"\nScoring {len(my_team)} team riders...\n")
@@ -663,6 +666,11 @@ def cmd_settle(args) -> None:
     else:
         print("\n  (No saved probs for this stage — skipping Brier tracking)")
 
+    # Save result history and value snapshot for validate command
+    stage_key = f"stage_{args.stage}"
+    state.setdefault("result_history", {})[stage_key] = asdict(result)
+    state.setdefault("value_snapshot", {})[stage_key] = value_snapshot
+
     # Update state
     state["bank"] = new_bank
     state["current_stage"] = args.stage
@@ -687,6 +695,133 @@ def cmd_settle(args) -> None:
     save_riders(riders, riders_path)
     _save_state(state, state_path)
     print(f"\nState saved. Bank: {new_bank/1e6:.3f}M")
+
+
+def cmd_validate(args) -> None:
+    """
+    Compare engine-calculated value deltas vs actual Holdet API values for a settled stage.
+
+    Requires:
+      - state["result_history"]["stage_N"] — saved by cmd_settle
+      - state["value_snapshot"]["stage_N"] — pre-stage rider values, saved by cmd_settle
+      - Live rider values from Holdet API (falls back to riders.json if API unavailable)
+
+    Logs mismatches (> ±1,000 tolerance) to tests/validation_log.md.
+    """
+    riders_path = config.get_riders_path()
+    stages_path = config.get_stages_path()
+    state_path = config.get_state_path()
+
+    state = _load_state(state_path)
+
+    # 1. Load stored StageResult
+    result_history = state.get("result_history", {})
+    stage_key = f"stage_{args.stage}"
+    if stage_key not in result_history:
+        print(
+            f"Error: No result history for stage {args.stage}. "
+            "Run 'python3 main.py settle --stage N' first.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    stored = result_history[stage_key]
+    result = StageResult(
+        stage_number=stored["stage_number"],
+        finish_order=stored["finish_order"],
+        times_behind_winner=stored.get("times_behind_winner", {}),
+        sprint_point_winners=stored.get("sprint_point_winners", {}),
+        kom_point_winners=stored.get("kom_point_winners", {}),
+        jersey_winners=stored.get("jersey_winners", {}),
+        most_aggressive=stored.get("most_aggressive"),
+        dnf_riders=stored.get("dnf_riders", []),
+        dns_riders=stored.get("dns_riders", []),
+        disqualified=stored.get("disqualified", []),
+        ttt_team_order=stored.get("ttt_team_order"),
+        gc_standings=stored.get("gc_standings", []),
+    )
+
+    # 2. Load stage and riders
+    stage = _load_stage(stages_path, args.stage)
+    riders = load_riders(riders_path)
+    all_riders_dict = {r.holdet_id: r for r in riders}
+
+    # 3. Fetch live rider values from API (falls back to riders.json on failure)
+    fresh_map: dict = {}
+    try:
+        session = get_session()
+        game_id = config.get_game_id()
+        live_riders = fetch_riders(game_id, session=session)
+        fresh_map = {r.holdet_id: r for r in live_riders}
+        print(f"  Fetched {len(live_riders)} riders from Holdet API.")
+    except (EnvironmentError, KeyError):
+        print("  Using local riders.json (HOLDET_GAME_ID not configured).", file=sys.stderr)
+        fresh_map = all_riders_dict
+    except Exception as exc:
+        print(f"  Warning: Could not fetch live values — {exc}", file=sys.stderr)
+        fresh_map = all_riders_dict
+
+    # 4. Load value snapshot
+    value_snapshot = state.get("value_snapshot", {}).get(stage_key, {})
+
+    # 5. Score and compare
+    my_team = state.get("my_team", [])
+    captain = state.get("captain") or (my_team[0] if my_team else "")
+    stages_remaining = config.TOTAL_STAGES - args.stage + 1
+
+    matches = 0
+    total = 0
+    discrepancies: list = []
+
+    print(f"\nValidating Stage {args.stage}:")
+    print(f"  {'Rider':<25} {'Engine':>10} {'Actual':>10} {'Δ':>8}  Status")
+    print(f"  {'-'*25} {'-'*10} {'-'*10} {'-'*8}  ------")
+
+    for rid in my_team:
+        r = all_riders_dict.get(rid)
+        if not r:
+            continue
+
+        vd = score_rider(
+            rider=r,
+            stage=stage,
+            result=result,
+            my_team=my_team,
+            captain=captain,
+            stages_remaining=stages_remaining,
+            all_riders=all_riders_dict,
+        )
+        engine_delta = vd.total_rider_value_delta
+
+        if rid not in fresh_map or rid not in value_snapshot:
+            reason = "no snapshot" if rid not in value_snapshot else "no live data"
+            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'—':>10} {'—':>8}  ({reason})")
+            continue
+
+        actual_delta = fresh_map[rid].value - value_snapshot[rid]
+
+        if actual_delta == 0:
+            # Holdet hasn't processed the stage yet — skip
+            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'0':>10} {'—':>8}  (no change detected)")
+            continue
+
+        diff = actual_delta - engine_delta
+        match = abs(diff) <= 1000
+        status = "OK" if match else "MISMATCH"
+        if match:
+            matches += 1
+        else:
+            discrepancies.append(r.name)
+            _log_mismatch(args.stage, r.name, "total_rider_value_delta", engine_delta, actual_delta)
+        total += 1
+        print(f"  {'V' if match else 'X'}   {r.name:<24} {engine_delta:>+10,} {actual_delta:>+10,} {diff:>+8,}  {status}")
+
+    print(f"\nEngine matched {matches}/{total} riders.")
+    if discrepancies:
+        print(f"Discrepancies: {', '.join(discrepancies)}")
+        print("See tests/validation_log.md for details.")
+    elif total > 0:
+        print("All riders match. ✓")
 
 
 def cmd_status(args) -> None:
@@ -724,6 +859,10 @@ def main() -> None:
     # status
     sub.add_parser("status", help="Show current team, bank, and rank")
 
+    # validate
+    p_validate = sub.add_parser("validate", help="Compare engine deltas vs Holdet API for a settled stage")
+    p_validate.add_argument("--stage", type=int, required=True, help="Stage number to validate")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -734,6 +873,8 @@ def main() -> None:
         cmd_settle(args)
     elif args.command == "status":
         cmd_status(args)
+    elif args.command == "validate":
+        cmd_validate(args)
 
 
 if __name__ == "__main__":

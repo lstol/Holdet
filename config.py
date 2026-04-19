@@ -17,9 +17,7 @@ def _require(key: str) -> str:
     if not val:
         raise EnvironmentError(
             f"Missing required environment variable: {key}\n"
-            f"Add it to .env — see .env.example for the full template.\n"
-            f"If this is a cookie variable, refresh from Chrome DevTools → "
-            f"Network → players request → Cookie header."
+            f"Add it to .env — see .env.example for the full template."
         )
     return val
 
@@ -35,9 +33,6 @@ def get_email() -> str:
 
 def get_password() -> str:
     return _require("HOLDET_PASSWORD")
-
-def get_cookie() -> str:
-    return _require("HOLDET_COOKIE")
 
 def get_game_id() -> str:
     return _require("HOLDET_GAME_ID")
