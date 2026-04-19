@@ -523,7 +523,7 @@ manual adjustments are adding value going into TdF.
 
 ---
 
-## 7. Frontend Architecture (Session 9 — TdF)
+## 7. Frontend Architecture (Sessions 9–10)
 
 **Stack:** React + Tailwind + Supabase + Supabase Auth + existing Python backend
 
@@ -557,6 +557,16 @@ or GitHub Actions to prevent free-tier project pausing.
 **Auth:** Supabase email/password auth. Each user manages their own team.
 Other participants sign up and use the tool independently for their own Holdet team.
 Game ID is the only parameter that changes between competitions.
+
+**API layer (Session 10):** `api/server.py` is a FastAPI app deployed on Railway.
+The frontend calls Railway endpoints for all write operations (ingest, brief, settle, team, sync).
+Railway reads credentials from environment variables — HOLDET_EMAIL, HOLDET_PASSWORD,
+SUPABASE_URL, SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY.
+Auto-login (Session 11) will replace manual cookie management entirely.
+
+**Frontend env config:**
+- `NEXT_PUBLIC_API_URL` — Railway URL for API calls (set in Netlify env vars)
+- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase read access
 
 ---
 

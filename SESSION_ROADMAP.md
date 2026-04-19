@@ -312,7 +312,47 @@ the last remaining manual input step in the ingestion pipeline.
 
 ---
 
-## Session 10 — Live Validation (after Giro start May 9)
+## Session 10 — FastAPI Bridge + Railway Deployment ✓ COMPLETE (2026-04-19)
+
+**Goal:** Add FastAPI server so frontend buttons trigger Python CLI actions.
+Deploy to Railway so holdet.syndikatet.eu works from any device.
+
+**What was built:**
+- `api/server.py` — FastAPI with endpoints: /status, /ingest, /brief, /settle, /team, /sync
+- `railway.json` — Railway deployment config
+- `requirements.txt` — all Python dependencies
+- `scripts/start_api.sh` — local dev start script
+- `tests/test_api.py` — 25 new tests (341 total)
+- Frontend buttons wired: [Refresh Riders], [Run Briefing], [Update My Team], [Settle Stage N]
+
+**Deployment:**
+- FastAPI: Railway (auto-deploys from GitHub main branch)
+- Frontend: Netlify (holdet.syndikatet.eu)
+- Auth: Holdet email/password login — auto-login implemented in Session 11
+
+341/341 tests passing. See SESSION_10_SUMMARY.md.
+
+---
+
+## Session 11 — Auto-Login + Live Validation (after Giro start May 9)
+
+**Goal:**
+- Implement automatic Holdet login so Railway server never needs manual cookie updates
+- Live engine validation against real Holdet stage results (Part B from Session 9)
+
+**Auto-login flow:**
+- GET https://www.holdet.dk/api/auth/csrf → csrfToken
+- POST https://www.holdet.dk/api/auth/signin/credentials
+- body: { email, password, csrfToken }
+- GET https://nexus-app-fantasy-fargate.holdet.dk/api/session → confirm valid
+- On 401 from any endpoint → re-authenticate automatically
+- Credentials from HOLDET_EMAIL + HOLDET_PASSWORD env vars (never hardcoded)
+
+**Live validation (after May 9):**
+- Run settle for each completed stage
+- Compare engine ValueDelta vs actual Holdet value changes
+- Log discrepancies in tests/validation_log.md
+- Fix engine bugs before trusting optimizer output
 
 ---
 
