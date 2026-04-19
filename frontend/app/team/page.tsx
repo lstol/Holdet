@@ -32,10 +32,12 @@ export default function TeamPage() {
   // Sync state
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await sb.auth.getUser()
+      setUser(user)
       if (!user) return
       const [ridersRes, gsRes] = await Promise.all([
         sb.from('riders').select('*').eq('user_id', user.id).eq('race', RACE),
@@ -111,6 +113,13 @@ export default function TeamPage() {
   const filteredRiders = riders
     .filter(r => !filterText || r.name?.toLowerCase().includes(filterText.toLowerCase()) || r.team?.toLowerCase().includes(filterText.toLowerCase()))
     .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+
+  if (!user) return (
+    <div className="text-center mt-24 space-y-4">
+      <p className="text-zinc-400">You need to be logged in to use the team.</p>
+      <a href="/auth" className="px-4 py-2 bg-orange-700 hover:bg-orange-600 text-white rounded-lg text-sm font-medium">Sign in</a>
+    </div>
+  )
 
   return (
     <div className="space-y-5">

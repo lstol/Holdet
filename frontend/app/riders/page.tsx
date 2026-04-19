@@ -27,10 +27,12 @@ export default function RidersPage() {
   const [sort, setSort] = useState<SortKey>('value')
   const [ingestLoading, setIngestLoading] = useState(false)
   const [ingestMsg, setIngestMsg] = useState<string | null>(null)
+  const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await sb.auth.getUser()
+      setUser(user)
       if (!user) return
       const [ridersRes, gsRes] = await Promise.all([
         sb.from('riders').select('*').eq('user_id', user.id).eq('race', RACE),
@@ -86,6 +88,13 @@ export default function RidersPage() {
       setIngestLoading(false)
     }
   }
+
+  if (!user) return (
+    <div className="text-center mt-24 space-y-4">
+      <p className="text-zinc-400">You need to be logged in to use the riders.</p>
+      <a href="/auth" className="px-4 py-2 bg-orange-700 hover:bg-orange-600 text-white rounded-lg text-sm font-medium">Sign in</a>
+    </div>
+  )
 
   return (
     <div className="space-y-4">

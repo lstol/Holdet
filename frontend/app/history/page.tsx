@@ -13,10 +13,12 @@ export default function HistoryPage() {
   const [brier, setBrier] = useState<BrierRecord[]>([])
   const [valueHistory, setValueHistory] = useState<ValueDelta[]>([])
   const [ridersMap, setRidersMap] = useState<Record<string, string>>({})
+  const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await sb.auth.getUser()
+      setUser(user)
       if (!user) return
       const [brierRes, valueRes, ridersRes] = await Promise.all([
         sb.from('brier_history').select('*').eq('user_id', user.id).eq('race', RACE).order('stage_number'),
@@ -63,6 +65,13 @@ export default function HistoryPage() {
     runningTotal += stageTotal
     return { stage: `S${stg}`, total: runningTotal }
   })
+
+  if (!user) return (
+    <div className="text-center mt-24 space-y-4">
+      <p className="text-zinc-400">You need to be logged in to use the history.</p>
+      <a href="/auth" className="px-4 py-2 bg-orange-700 hover:bg-orange-600 text-white rounded-lg text-sm font-medium">Sign in</a>
+    </div>
+  )
 
   return (
     <div className="space-y-8">

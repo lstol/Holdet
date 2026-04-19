@@ -114,10 +114,12 @@ export default function BriefingPage() {
   const [briefError, setBriefError] = useState<string | null>(null)
   const [ingestMsg, setIngestMsg] = useState<string | null>(null)
   const [showProfiles, setShowProfiles] = useState(false)
+  const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await sb.auth.getUser()
+      setUser(user)
       if (!user) return
 
       const [stagesRes, gsRes, ridersRes] = await Promise.all([
@@ -252,6 +254,13 @@ export default function BriefingPage() {
   const displayRiders = riders
     .filter(r => gs?.my_team?.includes(r.holdet_id) || !!probs[r.holdet_id])
     .sort((a, b) => (probs[b.holdet_id]?.p_win ?? 0) - (probs[a.holdet_id]?.p_win ?? 0))
+
+  if (!user) return (
+    <div className="text-center mt-24 space-y-4">
+      <p className="text-zinc-400">You need to be logged in to use the briefing.</p>
+      <a href="/auth" className="px-4 py-2 bg-orange-700 hover:bg-orange-600 text-white rounded-lg text-sm font-medium">Sign in</a>
+    </div>
+  )
 
   if (!stage) {
     return (
