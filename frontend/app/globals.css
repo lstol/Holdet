@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+:root {
+  --background: #09090b;
+  --foreground: #f4f4f5;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Source badge colours */
+.badge-model       { @apply bg-zinc-700 text-zinc-300; }
+.badge-odds        { @apply bg-blue-900 text-blue-300; }
+.badge-intelligence { @apply bg-purple-900 text-purple-300; }
+.badge-manual      { @apply bg-orange-900 text-orange-300; }
+.badge-adjusted    { @apply bg-orange-900 text-orange-300; }

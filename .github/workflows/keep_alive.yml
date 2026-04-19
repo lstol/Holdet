@@ -1,0 +1,25 @@
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: '0 9 */5 * *'   # every 5 days at 09:00 UTC
+  workflow_dispatch:          # allow manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install supabase-py
+        run: pip install supabase
+
+      - name: Ping Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python3 scripts/keep_alive.py
