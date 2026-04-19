@@ -1,0 +1,593 @@
+"""
+api/server.py — Local FastAPI bridge.
+
+The Next.js frontend calls this server (running on your laptop) to trigger
+Python CLI actions without touching a terminal.
+
+Run with:
+    bash scripts/start_api.sh
+    — or —
+    python3.14 -m uvicorn api.server:app --host 127.0.0.1 --port 8000 --reload
+
+Only runs locally. Never deployed to the cloud (Giro constraint).
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from dataclasses import asdict
+from pathlib import Path
+from typing import Optional
+
+# Ensure project root is importable regardless of cwd
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+import config
+from ingestion.api import fetch_riders, fetch_my_team, save_riders, load_riders
+from scoring.engine import (
+    Rider, Stage, StageResult, SprintPoint, KOMPoint, score_rider,
+)
+from scoring.probabilities import generate_priors, save_probs
+from scoring.simulator import simulate_team
+from scoring.optimizer import optimize_all_profiles, suggest_profile
+from output.tracker import record_stage_accuracy, save_accuracy
+
+
+# ── State helpers (mirror main.py) ────────────────────────────────────────────
+
+def _load_state(path: str | None = None) -> dict:
+    path = path or config.get_state_path()
+    defaults: dict = {
+        "current_stage": 0,
+        "bank": config.INITIAL_BUDGET,
+        "rank": None,
+        "total_participants": None,
+        "my_team": [],
+        "captain": None,
+        "stages_completed": [],
+        "probs_by_stage": {},
+    }
+    if not os.path.exists(path):
+        return defaults
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        for k, v in defaults.items():
+            data.setdefault(k, v)
+        return data
+    except (json.JSONDecodeError, OSError):
+        return defaults
+
+
+def _save_state(state: dict, path: str | None = None) -> None:
+    path = path or config.get_state_path()
+    tmp = path + ".tmp"
+    os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(state, fh, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def _load_stage(stage_number: int) -> Stage:
+    stages_path = config.get_stages_path()
+    if not os.path.exists(stages_path):
+        raise HTTPException(status_code=404, detail=f"stages.json not found at {stages_path}")
+    with open(stages_path, encoding="utf-8") as fh:
+        stages_data = json.load(fh)
+
+    stages_list: list = (
+        stages_data if isinstance(stages_data, list)
+        else stages_data.get("stages", list(stages_data.values()) if isinstance(stages_data, dict) else [])
+    )
+    for s in stages_list:
+        if not isinstance(s, dict) or s.get("number") != stage_number:
+            continue
+        sprint_points = [
+            SprintPoint(
+                location=sp.get("location", ""),
+                km_from_start=float(sp.get("km_from_start", 0)),
+                points_available=sp.get("points_available", []),
+                is_finish=sp.get("is_finish", False),
+            )
+            for sp in s.get("sprint_points", [])
+        ]
+        kom_points = [
+            KOMPoint(
+                location=kp.get("location", ""),
+                km_from_start=float(kp.get("km_from_start", 0)),
+                category=kp.get("category", "4"),
+                points_available=kp.get("points_available", []),
+            )
+            for kp in s.get("kom_points", [])
+        ]
+        return Stage(
+            number=s["number"],
+            race=s.get("race", "giro_2026"),
+            stage_type=s.get("stage_type", "flat"),
+            distance_km=float(s.get("distance_km", 0)),
+            is_ttt=s.get("is_ttt", False),
+            start_location=s.get("start_location", ""),
+            finish_location=s.get("finish_location", ""),
+            sprint_points=sprint_points,
+            kom_points=kom_points,
+            notes=s.get("notes", ""),
+        )
+    raise HTTPException(status_code=404, detail=f"Stage {stage_number} not found")
+
+
+def _resolve_name(fragment: str, rider_map: dict[str, Rider]) -> str:
+    fragment = fragment.strip()
+    if fragment in rider_map:
+        return fragment
+    frag_lower = fragment.lower()
+    matches = [rid for rid, r in rider_map.items() if frag_lower in r.name.lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) == 0:
+        raise HTTPException(status_code=422, detail=f"No rider matching '{fragment}'")
+    names = ", ".join(rider_map[rid].name for rid in matches[:5])
+    raise HTTPException(status_code=422, detail=f"Ambiguous '{fragment}': {names}")
+
+
+def _resolve_list(fragments: list[str], rider_map: dict[str, Rider]) -> list[str]:
+    return [_resolve_name(f, rider_map) for f in fragments if f.strip()]
+
+
+def _serialize_profiles(profiles: dict, rider_map: dict[str, Rider]) -> dict:
+    """Convert RiskProfile → ProfileRecommendation mapping to JSON-safe dict."""
+    out: dict = {}
+    for profile, rec in profiles.items():
+        key = profile.value if hasattr(profile, "value") else str(profile)
+        transfers = []
+        for t in rec.transfers:
+            td = asdict(t) if hasattr(t, "__dataclass_fields__") else dict(t)
+            # Annotate with rider name if not already present
+            if "rider_name" not in td and "rider_id" in td:
+                r = rider_map.get(td["rider_id"])
+                td["rider_name"] = r.name if r else td["rider_id"]
+            transfers.append(td)
+        captain_name = rider_map.get(rec.captain, Rider.__new__(Rider)).name if rec.captain in rider_map else rec.captain
+        out[key] = {
+            "transfers": transfers,
+            "captain": rec.captain,
+            "captain_name": captain_name,
+            "expected_value": rec.expected_value,
+            "upside_90pct": rec.upside_90pct,
+            "downside_10pct": rec.downside_10pct,
+            "transfer_cost": rec.transfer_cost,
+            "reasoning": rec.reasoning,
+        }
+    return out
+
+
+# ── App ───────────────────────────────────────────────────────────────────────
+
+app = FastAPI(title="Holdet API Bridge", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://holdet.syndikatet.eu",
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ── Request / Response models ─────────────────────────────────────────────────
+
+class BriefRequest(BaseModel):
+    stage: int
+    look_ahead: int = 5       # used as stages_remaining for optimizer
+    captain_override: Optional[str] = None  # holdet_id
+
+
+class TeamRequest(BaseModel):
+    my_team: list[str]   # holdet_ids (exactly 8)
+    captain: str         # holdet_id
+
+
+class SettleRequest(BaseModel):
+    stage: int
+    finish_order: list[str]              # holdet_ids, best first (top 15+)
+    dnf_riders: list[str] = []
+    dns_riders: list[str] = []
+    gc_standings: list[str] = []        # holdet_ids, leader first
+    jersey_winners: dict[str, str] = {} # "yellow" → holdet_id
+    most_aggressive: Optional[str] = None
+    sprint_point_winners: dict[str, int] = {}  # holdet_id → total pts
+    kom_point_winners: dict[str, int] = {}
+    times_behind_winner: dict[str, int] = {}   # holdet_id → seconds
+    ttt_team_order: Optional[list[str]] = None
+    holdet_bank: Optional[float] = None  # actual bank for validation
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@app.get("/status")
+def get_status() -> dict:
+    """Return current team, bank, rank, and DNS alerts."""
+    state = _load_state()
+    riders_path = config.get_riders_path()
+    riders = load_riders(riders_path) if os.path.exists(riders_path) else []
+    rider_map = {r.holdet_id: r for r in riders}
+
+    my_team_ids: list[str] = state.get("my_team", [])
+    team_riders = []
+    dns_alerts = []
+    for rid in my_team_ids:
+        r = rider_map.get(rid)
+        if r:
+            team_riders.append({
+                "holdet_id": r.holdet_id,
+                "name": r.name,
+                "team": r.team,
+                "team_abbr": r.team_abbr,
+                "value": r.value,
+                "status": r.status,
+                "is_captain": rid == state.get("captain"),
+            })
+            if r.status in ("dns", "dnf"):
+                dns_alerts.append({"name": r.name, "status": r.status})
+
+    return {
+        "current_stage": state.get("current_stage"),
+        "bank": state.get("bank"),
+        "rank": state.get("rank"),
+        "total_participants": state.get("total_participants"),
+        "captain": state.get("captain"),
+        "team": team_riders,
+        "stages_completed": state.get("stages_completed", []),
+        "dns_alerts": dns_alerts,
+    }
+
+
+@app.post("/ingest")
+def post_ingest() -> dict:
+    """Fetch latest riders + team from Holdet API. Updates state.json and riders.json."""
+    try:
+        cookie = config.get_cookie()
+        game_id = config.get_game_id()
+        fantasy_team_id = config.get_fantasy_team_id()
+        cartridge = config.get_cartridge()
+    except EnvironmentError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    try:
+        riders = fetch_riders(game_id, cookie)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Holdet API error: {exc}")
+
+    riders_path = config.get_riders_path()
+    save_riders(riders, riders_path)
+
+    state = _load_state()
+    rider_map = {r.holdet_id: r for r in riders}
+    dns_alerts: list[dict] = []
+    my_team_ids: list[str] = []
+
+    try:
+        team_data = fetch_my_team(fantasy_team_id, cartridge, cookie)
+        lineup = team_data.get("lineup", [])
+        for player in lineup:
+            pid = str(player.get("id", ""))
+            if pid in rider_map:
+                my_team_ids.append(pid)
+        state["my_team"] = my_team_ids
+        state["captain"] = str(team_data.get("captain", "")) or None
+        state["bank"] = team_data.get("bank", state["bank"])
+    except PermissionError:
+        pass  # Cookie expired — riders saved, team not updated
+
+    for rid in my_team_ids:
+        r = rider_map.get(rid)
+        if r and r.status in ("dns", "dnf"):
+            dns_alerts.append({"name": r.name, "status": r.status})
+
+    _save_state(state)
+
+    # Auto-sync to Supabase (best-effort)
+    try:
+        from scripts.sync_to_supabase import sync_all
+        sync_all(race="giro_2026")
+    except Exception:
+        pass
+
+    return {
+        "riders_count": len(riders),
+        "my_team_count": len(my_team_ids),
+        "bank": state.get("bank"),
+        "dns_alerts": dns_alerts,
+    }
+
+
+@app.post("/brief")
+def post_brief(req: BriefRequest) -> dict:
+    """
+    Run the full briefing pipeline (model priors → simulator → optimizer).
+    Returns 4-profile recommendation table + probability data.
+    No interactive prompts — model probs only (no odds/manual adjustment).
+    """
+    riders_path = config.get_riders_path()
+    if not os.path.exists(riders_path):
+        raise HTTPException(status_code=404, detail="No riders.json — run /ingest first")
+
+    riders = load_riders(riders_path)
+    stage = _load_stage(req.stage)
+    state = _load_state()
+
+    my_team: list[str] = state.get("my_team", [])
+    captain = req.captain_override or state.get("captain") or (my_team[0] if my_team else "")
+    bank: float = state.get("bank", config.INITIAL_BUDGET)
+    rank = state.get("rank")
+    total = state.get("total_participants")
+    stages_remaining = min(req.look_ahead, config.TOTAL_STAGES - req.stage + 1)
+
+    rider_map = {r.holdet_id: r for r in riders}
+
+    # Model probs (no interactive adjustment)
+    probs = generate_priors(riders, stage)
+
+    # Simulate full field for optimizer
+    all_sims = simulate_team(
+        riders=riders,
+        stage=stage,
+        probs=probs,
+        my_team=my_team,
+        captain=captain,
+        stages_remaining=stages_remaining,
+    )
+
+    # Current team EV
+    current_team_ev = sum(
+        all_sims[rid].expected_value for rid in my_team if rid in all_sims
+    )
+
+    # Optimize all 4 profiles
+    recommendations = optimize_all_profiles(
+        riders=riders,
+        my_team=my_team,
+        stage=stage,
+        probs=probs,
+        sim_results=all_sims,
+        bank=bank,
+        rank=rank,
+        total_participants=total,
+        stages_remaining=stages_remaining,
+    )
+
+    # Suggested profile
+    suggested_profile = None
+    suggested_reason = "No rank data — defaulting to BALANCED"
+    if rank and total:
+        sp, suggested_reason = suggest_profile(rank, total, stages_remaining)
+        suggested_profile = sp.value if sp else None
+
+    # Save probs to state
+    probs_dict = {
+        rid: {
+            "p_win": rp.p_win, "p_top3": rp.p_top3,
+            "p_top10": rp.p_top10, "p_top15": rp.p_top15,
+            "p_dnf": rp.p_dnf, "source": rp.source,
+        }
+        for rid, rp in probs.items()
+    }
+    state.setdefault("probs_by_stage", {})[str(req.stage)] = probs_dict
+    _save_state(state)
+
+    # DNS alerts for team
+    dns_alerts = [
+        {"name": rider_map[rid].name, "status": rider_map[rid].status}
+        for rid in my_team
+        if rid in rider_map and rider_map[rid].status in ("dns", "dnf")
+    ]
+
+    # Top riders by EV for quick overview
+    team_sims = [
+        {
+            "holdet_id": rid,
+            "name": rider_map[rid].name if rid in rider_map else rid,
+            "expected_value": round(all_sims[rid].expected_value),
+            "downside_10pct": round(all_sims[rid].percentile_10),
+            "upside_90pct": round(all_sims[rid].percentile_90),
+            "is_captain": rid == captain,
+        }
+        for rid in my_team if rid in all_sims
+    ]
+
+    return {
+        "stage_number": req.stage,
+        "stage_type": stage.stage_type,
+        "start_location": stage.start_location,
+        "finish_location": stage.finish_location,
+        "current_team_ev": round(current_team_ev),
+        "stages_remaining": stages_remaining,
+        "captain": captain,
+        "suggested_profile": suggested_profile,
+        "suggested_profile_reason": suggested_reason,
+        "profiles": _serialize_profiles(recommendations, rider_map),
+        "team_sims": team_sims,
+        "dns_alerts": dns_alerts,
+    }
+
+
+@app.post("/settle")
+def post_settle(req: SettleRequest) -> dict:
+    """
+    Score all team riders for a completed stage. Updates bank + state.
+    All rider references must be holdet_ids.
+    """
+    riders_path = config.get_riders_path()
+    if not os.path.exists(riders_path):
+        raise HTTPException(status_code=404, detail="No riders.json — run /ingest first")
+
+    riders = load_riders(riders_path)
+    stage = _load_stage(req.stage)
+    state = _load_state()
+
+    my_team: list[str] = state.get("my_team", [])
+    captain = state.get("captain") or (my_team[0] if my_team else "")
+    bank: float = state.get("bank", config.INITIAL_BUDGET)
+    stages_remaining = config.TOTAL_STAGES - req.stage + 1
+    all_riders_dict = {r.holdet_id: r for r in riders}
+    rider_map = all_riders_dict
+
+    # Build StageResult
+    sprint_point_winners = {rid: [pts] for rid, pts in req.sprint_point_winners.items()}
+    kom_point_winners = {rid: [pts] for rid, pts in req.kom_point_winners.items()}
+
+    result = StageResult(
+        stage_number=req.stage,
+        finish_order=req.finish_order,
+        times_behind_winner=req.times_behind_winner,
+        sprint_point_winners=sprint_point_winners,
+        kom_point_winners=kom_point_winners,
+        jersey_winners=req.jersey_winners,
+        most_aggressive=req.most_aggressive,
+        dnf_riders=req.dnf_riders,
+        dns_riders=req.dns_riders,
+        disqualified=[],
+        ttt_team_order=req.ttt_team_order,
+        gc_standings=req.gc_standings,
+    )
+
+    # Score team riders
+    rider_results = []
+    total_bank_delta = 0.0
+    etapebonus_credited = False
+
+    for rid in my_team:
+        r = rider_map.get(rid)
+        if not r:
+            continue
+        vd = score_rider(
+            rider=r,
+            stage=stage,
+            result=result,
+            my_team=my_team,
+            captain=captain,
+            stages_remaining=stages_remaining,
+            all_riders=all_riders_dict,
+        )
+        total_bank_delta += vd.captain_bank_deposit
+        if not etapebonus_credited:
+            total_bank_delta += vd.etapebonus_bank_deposit
+            etapebonus_credited = True
+
+        rider_results.append({
+            "holdet_id": rid,
+            "name": r.name,
+            "is_captain": rid == captain,
+            "stage_position_value": vd.stage_position_value,
+            "gc_standing_value": vd.gc_standing_value,
+            "jersey_bonus": vd.jersey_bonus,
+            "sprint_kom_value": vd.sprint_kom_value,
+            "late_arrival_penalty": vd.late_arrival_penalty,
+            "dnf_penalty": vd.dnf_penalty,
+            "dns_penalty": vd.dns_penalty,
+            "team_bonus": vd.team_bonus,
+            "ttt_value": vd.ttt_value,
+            "total_rider_value_delta": vd.total_rider_value_delta,
+            "captain_bank_deposit": vd.captain_bank_deposit,
+            "etapebonus_bank_deposit": vd.etapebonus_bank_deposit if not etapebonus_credited else 0,
+        })
+
+    new_bank = bank + total_bank_delta
+
+    # Brier tracking
+    stage_probs_raw = state.get("probs_by_stage", {}).get(str(req.stage), {})
+    brier_summary = None
+    if stage_probs_raw:
+        from scoring.probabilities import RiderProb
+        stage_probs = {
+            rid: RiderProb(
+                rider_id=rid, stage_number=req.stage,
+                p_win=d.get("p_win", 0.0), p_top3=d.get("p_top3", 0.0),
+                p_top10=d.get("p_top10", 0.0), p_top15=d.get("p_top15", 0.0),
+                p_dnf=d.get("p_dnf", 0.0), source=d.get("source", "model"),
+            )
+            for rid, d in stage_probs_raw.items()
+        }
+        accuracy_records = record_stage_accuracy(req.stage, stage_probs, result, state)
+        state = save_accuracy(accuracy_records, state)
+        if accuracy_records:
+            avg_brier = sum(r.model_brier for r in accuracy_records) / len(accuracy_records)
+            brier_summary = {"avg_model_brier": round(avg_brier, 4), "records": len(accuracy_records)}
+
+    # Update state
+    state["bank"] = new_bank
+    state["current_stage"] = req.stage
+    state["stages_completed"] = list(set(state.get("stages_completed", []) + [req.stage]))
+
+    # Update rider values in riders.json
+    for rid in my_team:
+        r = rider_map.get(rid)
+        if not r:
+            continue
+        vd = score_rider(
+            rider=r, stage=stage, result=result, my_team=my_team,
+            captain=captain, stages_remaining=stages_remaining, all_riders=all_riders_dict,
+        )
+        r.value += vd.total_rider_value_delta
+
+    save_riders(riders, riders_path)
+    _save_state(state)
+
+    # Auto-sync to Supabase (best-effort)
+    try:
+        from scripts.sync_to_supabase import sync_all
+        sync_all(race="giro_2026")
+    except Exception:
+        pass
+
+    return {
+        "stage": req.stage,
+        "old_bank": bank,
+        "new_bank": new_bank,
+        "total_bank_delta": total_bank_delta,
+        "rider_results": rider_results,
+        "brier_summary": brier_summary,
+    }
+
+
+@app.post("/team")
+def post_team(req: TeamRequest) -> dict:
+    """Update my_team and captain in state.json, then sync to Supabase."""
+    if len(req.my_team) != 8:
+        raise HTTPException(status_code=422, detail=f"Team must have exactly 8 riders, got {len(req.my_team)}")
+    if req.captain not in req.my_team:
+        raise HTTPException(status_code=422, detail="Captain must be one of the 8 team riders")
+
+    state = _load_state()
+    state["my_team"] = req.my_team
+    state["captain"] = req.captain
+    _save_state(state)
+
+    # Auto-sync
+    try:
+        from scripts.sync_to_supabase import sync_all
+        sync_all(race="giro_2026")
+    except Exception:
+        pass
+
+    return {"my_team": req.my_team, "captain": req.captain, "saved": True}
+
+
+@app.post("/sync")
+def post_sync() -> dict:
+    """Push current state to Supabase."""
+    try:
+        from scripts.sync_to_supabase import sync_all
+        result = sync_all(race="giro_2026")
+        return {"synced": True, **(result or {})}
+    except ImportError:
+        raise HTTPException(status_code=500, detail="supabase-py not installed. Run: pip install supabase")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

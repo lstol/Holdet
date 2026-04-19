@@ -278,5 +278,32 @@ def main() -> None:
         sys.exit(0)  # graceful — don't break the CLI workflow
 
 
+def sync_all(race: str = "giro_2026") -> dict:
+    """
+    Programmatic entry point for the API server.
+    Returns a summary dict. Raises on hard errors; returns {} on soft failures.
+    """
+    _load_env()
+    state_raw = _load_json(STATE_JSON)
+    if state_raw is None:
+        return {}
+    user_id = state_raw.get("user_id")
+    if not user_id:
+        return {}
+    client = _supabase_client()
+    if client is None:
+        return {}
+    n_stages  = sync_stages(client, race)
+    n_riders  = sync_riders(client, race, user_id)
+    sync_game_state(client, race, user_id, state_raw)
+    n_probs   = sync_prob_snapshots(client, race, user_id, state_raw)
+    n_values  = sync_value_history(client, race, user_id, state_raw)
+    n_brier   = sync_brier_history(client, race, user_id, state_raw)
+    return {
+        "stages": n_stages, "riders": n_riders, "prob_snapshots": n_probs,
+        "value_history": n_values, "brier_history": n_brier,
+    }
+
+
 if __name__ == "__main__":
     main()

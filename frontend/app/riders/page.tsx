@@ -1,8 +1,10 @@
 'use client'
 import { useEffect, useState, useMemo } from 'react'
 import { createClient, Rider, ProbSnapshot, GameState } from '@/lib/supabase'
+import { RefreshCw } from 'lucide-react'
 
 const RACE = 'giro_2026'
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
 function fmt(v: number | null) {
   if (v == null) return '—'
@@ -23,6 +25,8 @@ export default function RidersPage() {
   const [minValue, setMinValue] = useState(0)
   const [maxValue, setMaxValue] = useState(20_000_000)
   const [sort, setSort] = useState<SortKey>('value')
+  const [ingestLoading, setIngestLoading] = useState(false)
+  const [ingestMsg, setIngestMsg] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -68,9 +72,36 @@ export default function RidersPage() {
       })
   }, [riders, filterTeam, filterStatus, filterMyTeam, minValue, maxValue, sort, probs, gs])
 
+  const ingest = async () => {
+    setIngestLoading(true)
+    setIngestMsg(null)
+    try {
+      const res = await fetch(`${API}/ingest`, { method: 'POST' })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.detail ?? 'Ingest failed')
+      setIngestMsg(`✓ ${d.riders_count} riders refreshed`)
+    } catch (e: unknown) {
+      setIngestMsg(`✗ ${e instanceof Error ? e.message : 'Server not running?'}`)
+    } finally {
+      setIngestLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Riders</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">Riders</h1>
+        <div className="flex items-center gap-2">
+          <button onClick={ingest} disabled={ingestLoading}
+            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 rounded-lg text-sm font-medium transition-colors">
+            <RefreshCw size={14} className={ingestLoading ? 'animate-spin' : ''} />
+            {ingestLoading ? 'Refreshing…' : 'Ingest'}
+          </button>
+          {ingestMsg && (
+            <span className={`text-xs ${ingestMsg.startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>{ingestMsg}</span>
+          )}
+        </div>
+      </div>
 
       {/* Filters */}
       <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800 flex flex-wrap gap-3 items-end text-sm">
