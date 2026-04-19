@@ -36,11 +36,16 @@ class RiderProb:
 # ── Base probability tables ───────────────────────────────────────────────────
 
 BASE_TOP15: dict[str, dict[str, float]] = {
-    "flat":     {"sprinter": 0.35, "climber": 0.05, "gc": 0.08, "tt": 0.10, "all": 0.12},
-    "hilly":    {"sprinter": 0.10, "climber": 0.18, "gc": 0.15, "tt": 0.10, "all": 0.12},
-    "mountain": {"sprinter": 0.02, "climber": 0.25, "gc": 0.30, "tt": 0.12, "all": 0.08},
-    "itt":      {"sprinter": 0.08, "climber": 0.08, "gc": 0.20, "tt": 0.40, "all": 0.12},
-    "ttt":      {"sprinter": 0.50, "climber": 0.50, "gc": 0.50, "tt": 0.50, "all": 0.50},
+    "flat":     {"sprinter": 0.35, "climber": 0.05, "gc": 0.08, "tt": 0.10,
+                 "specialist": 0.15, "domestique": 0.04, "all": 0.12},
+    "hilly":    {"sprinter": 0.10, "climber": 0.18, "gc": 0.15, "tt": 0.10,
+                 "specialist": 0.22, "domestique": 0.04, "all": 0.12},
+    "mountain": {"sprinter": 0.02, "climber": 0.25, "gc": 0.45, "tt": 0.12,
+                 "specialist": 0.12, "domestique": 0.03, "all": 0.08},
+    "itt":      {"sprinter": 0.08, "climber": 0.08, "gc": 0.20, "tt": 0.40,
+                 "specialist": 0.14, "domestique": 0.04, "all": 0.12},
+    "ttt":      {"sprinter": 0.50, "climber": 0.50, "gc": 0.50, "tt": 0.50,
+                 "specialist": 0.50, "domestique": 0.50, "all": 0.50},
 }
 
 # Jersey retention probability by stage type
@@ -57,8 +62,22 @@ def _clamp(v: float) -> float:
     return max(0.0, min(1.0, v))
 
 
-def _rider_type(rider: Rider) -> str:
-    """Classify rider type using value as proxy (to be improved in Session 8)."""
+def _rider_type(rider: Rider, stage: Stage) -> str:
+    """
+    Classify rider by value bracket and stage type.
+
+    > 8M  → "gc" on mountain/hilly (GC contenders), "sprinter" on flat/itt
+    > 5M  → "specialist" (punchers, breakaway riders)
+    < 3M  → "domestique" (low-value support riders)
+    else  → "all"
+    """
+    v = rider.value
+    if v > 8_000_000:
+        return "gc" if stage.stage_type in ("mountain", "hilly") else "sprinter"
+    if v > 5_000_000:
+        return "specialist"
+    if v < 3_000_000:
+        return "domestique"
     return "all"
 
 
@@ -100,7 +119,7 @@ def generate_priors(
             )
             continue
 
-        rtype = _rider_type(rider)
+        rtype = _rider_type(rider, stage)
         p_top15 = _clamp(base_table.get(rtype, base_table.get("all", 0.12)))
 
         # Derive hierarchy using fixed ratios

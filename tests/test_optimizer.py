@@ -572,6 +572,71 @@ class TestProfileBehaviour:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# TestAnchorRealisticFixtures (A2 done conditions)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAnchorRealisticFixtures:
+    """
+    A2: Verify ANCHOR retains GC riders for the right reason — guaranteed
+    per-stage GC standing income — not artificially inflated test fixtures.
+
+    Fixture facts (from _mountain_sim / _sprinter_sim):
+      GC rider:   p10 = +60k (reliable: GC standing value even on bad flat day)
+                  EV  = +70k
+      Sprinter:   p10 = +25k (lower floor: crash / missed sprint risk)
+                  EV  = +80k (higher EV and ceiling)
+
+    ANCHOR maximises p10. GC rider p10 (60k) > sprinter p10 (25k) → ANCHOR
+    correctly keeps GC riders. This is "the right reason".
+    """
+
+    def test_gc_rider_p10_exceeds_sprinter_p10(self):
+        """Document that GC standing income produces higher p10 than sprinter floor."""
+        gc_sim = _mountain_sim("R1")
+        sp_sim = _sprinter_sim("S1")
+        assert gc_sim.percentile_10 > sp_sim.percentile_10, (
+            f"GC p10 ({gc_sim.percentile_10:,}) should exceed "
+            f"sprinter p10 ({sp_sim.percentile_10:,})"
+        )
+
+    def test_anchor_downside_10pct_is_positive(
+        self, riders, mountain_squad_ids, flat_stage, sim_results, bank, stages_remaining, all_recommendations
+    ):
+        """ANCHOR recommendation's p10 is positive — GC standing income guaranteed even on bad days."""
+        anchor = all_recommendations[RiskProfile.ANCHOR]
+        assert anchor.downside_10pct > 0, (
+            f"ANCHOR p10 ({anchor.downside_10pct:,}) should be positive "
+            "(GC standing value guaranteed even when not contesting sprint)"
+        )
+
+    def test_anchor_does_not_protect_dns_gc_rider(
+        self, riders, flat_stage, sim_results, bank, stages_remaining
+    ):
+        """ANCHOR must sell a DNS GC top-10 rider — protection doesn't apply to unavailable riders."""
+        dns_riders = [
+            _make_rider("R1", "TEAM_A", gc_position=1, status="dns"),
+        ] + [r for r in riders if r.holdet_id != "R1"]
+        my_team = [f"R{i}" for i in range(1, 9)]
+
+        rec = optimize(
+            riders=dns_riders,
+            my_team=my_team,
+            stage=flat_stage,
+            probs={},
+            sim_results=sim_results,
+            bank=bank,
+            risk_profile=RiskProfile.ANCHOR,
+            rank=None,
+            total_participants=None,
+            stages_remaining=stages_remaining,
+        )
+        sold_ids = {t.rider_id for t in rec.transfers if t.action == "sell"}
+        assert "R1" in sold_ids, (
+            "ANCHOR should sell DNS GC rider R1 — status=dns overrides GC protection"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # TestCaptainSelection
 # ═══════════════════════════════════════════════════════════════════════════════
 

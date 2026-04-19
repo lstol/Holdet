@@ -223,6 +223,43 @@ class TestSprintKOM:
         assert rp.expected_kom_points > 0.0
 
 
+# ── Rider type classification tests ──────────────────────────────────────────
+
+class TestRiderTypeClassification:
+    """A1: value-bracket classification gives differentiated priors."""
+
+    def test_gc_rider_higher_p_top15_on_mountain_than_flat(self):
+        """GC rider (value > 8M) gets higher p_top15 on mountain than flat."""
+        gc_rider = make_rider(value=10_000_000)
+        rp_mountain = generate_priors([gc_rider], make_stage("mountain"))["r1"]
+        rp_flat = generate_priors([gc_rider], make_stage("flat"))["r1"]
+        assert rp_mountain.p_top15 > rp_flat.p_top15, (
+            f"GC rider mountain p_top15 ({rp_mountain.p_top15}) should exceed "
+            f"flat p_top15 ({rp_flat.p_top15})"
+        )
+
+    def test_high_value_rider_outperforms_domestique_on_flat(self):
+        """On a flat stage, high-value rider (sprinter type) has much higher p_top15 than domestique."""
+        sprinter = make_rider(holdet_id="s1", value=10_000_000)
+        domestique = make_rider(holdet_id="d1", value=2_000_000)
+        flat = make_stage("flat")
+        rp_sprinter = generate_priors([sprinter, domestique], flat)["s1"]
+        rp_domestique = generate_priors([sprinter, domestique], flat)["d1"]
+        assert rp_sprinter.p_top15 > rp_domestique.p_top15, (
+            f"Sprinter flat p_top15 ({rp_sprinter.p_top15}) should exceed "
+            f"domestique flat p_top15 ({rp_domestique.p_top15})"
+        )
+
+    def test_domestique_gets_low_p_top15_on_all_stage_types(self):
+        """Domestique (value < 3M) gets low p_top15 across all stage types."""
+        domestique = make_rider(value=2_000_000)
+        for stage_type in ("flat", "hilly", "mountain", "itt"):
+            rp = generate_priors([domestique], make_stage(stage_type))["r1"]
+            assert rp.p_top15 <= 0.05, (
+                f"Domestique p_top15 on {stage_type} is {rp.p_top15} (expected ≤ 0.05)"
+            )
+
+
 # ── Manual adjustment tests ───────────────────────────────────────────────────
 
 class TestInteractiveAdjust:
