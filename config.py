@@ -30,6 +30,12 @@ def _optional(key: str, default: str) -> str:
 
 # ── Required ───────────────────────────────────────────────────────────────────
 
+def get_email() -> str:
+    return _require("HOLDET_EMAIL")
+
+def get_password() -> str:
+    return _require("HOLDET_PASSWORD")
+
 def get_cookie() -> str:
     return _require("HOLDET_COOKIE")
 
