@@ -139,11 +139,11 @@ def sync_game_state(client, race: str, user_id: str, state: dict) -> bool:
         "race":             race,
         "current_stage":    state.get("current_stage", 1),
         "total_stages":     state.get("total_stages", 21),
-        "my_team":          json.dumps(state.get("my_team", [])),
+        "my_team":          state.get("my_team", []),
         "captain":          state.get("captain"),
         "bank":             state.get("bank", 50_000_000),
         "initial_budget":   state.get("initial_budget", 50_000_000),
-        "stages_completed": json.dumps(state.get("stages_completed", [])),
+        "stages_completed": state.get("stages_completed", []),
         "my_rank":          state.get("rank"),
         "total_participants": state.get("total_participants"),
     }

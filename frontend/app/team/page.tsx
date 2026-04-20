@@ -33,27 +33,38 @@ export default function TeamPage() {
 
   useEffect(() => {
     async function load() {
-      const { data: { user } } = await sb.auth.getUser()
-      setUser(user)
-      if (!user) return
-      const [ridersRes, gsRes] = await Promise.all([
-        sb.from('riders').select('*').eq('user_id', user.id).eq('race', RACE),
-        sb.from('game_state').select('*').eq('user_id', user.id).eq('race', RACE).single(),
-      ])
-      const rList = (ridersRes.data as Rider[]) ?? []
-      setRiders(rList)
-      setGs(gsRes.data as GameState | null)
+      try {
+        const { data: { user } } = await sb.auth.getUser()
+        setUser(user)
+        if (!user) return
+        const [ridersRes, gsRes] = await Promise.all([
+          sb.from('riders').select('*').eq('user_id', user.id).eq('race', RACE),
+          sb.from('game_state').select('*').eq('user_id', user.id).eq('race', RACE).single(),
+        ])
+        const rList = (ridersRes.data as Rider[]) ?? []
+        setRiders(rList)
+        const gsData = gsRes.data as GameState | null
+        setGs(gsData)
 
-      // Pre-populate editor with current team
-      const currentTeam = (gsRes.data as GameState | null)?.my_team ?? []
-      const currentCaptain = (gsRes.data as GameState | null)?.captain ?? ''
-      setSelectedIds(currentTeam)
-      setCaptainId(currentCaptain)
+        // Pre-populate editor with current team — my_team may come back as JSON string
+        const rawTeam = gsData?.my_team
+        const currentTeam: string[] = typeof rawTeam === 'string'
+          ? JSON.parse(rawTeam)
+          : (rawTeam ?? [])
+        const currentCaptain = gsData?.captain ?? ''
+        setSelectedIds(currentTeam)
+        setCaptainId(currentCaptain)
+      } catch (e) {
+        console.error('TeamPage load error:', e)
+      }
     }
     load()
   }, [])
 
-  const teamRiders = riders.filter(r => gs?.my_team?.includes(r.holdet_id))
+  const myTeamIds: string[] = typeof gs?.my_team === 'string'
+    ? (() => { try { return JSON.parse(gs.my_team as string) } catch { return [] } })()
+    : (gs?.my_team ?? [])
+  const teamRiders = riders.filter(r => myTeamIds.includes(r.holdet_id))
   const totalValue = teamRiders.reduce((s, r) => s + (r.value ?? 0), 0)
   const totalStart = teamRiders.reduce((s, r) => s + (r.start_value ?? 0), 0)
   const totalDelta = totalValue - totalStart

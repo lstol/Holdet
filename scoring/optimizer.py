@@ -415,9 +415,35 @@ def optimize(
                 fee=fee,
                 reasoning="Last-resort fill: cheapest eligible rider",
             ))
+
+    # ── Emergency fill: ignore fees, just get to 8 ───────────────────────────
+    if len(active_squad) < 8:
+        logging.warning("Emergency fill triggered — could not reach 8 riders normally")
+        em_team_counts = _count_teams(active_squad, rider_map)
+        remaining = sorted(
+            [
+                (rid, r) for rid, r in eligible.items()
+                if rid not in active_squad
+                and em_team_counts.get(r.team_abbr, 0) < 2
+            ],
+            key=lambda x: x[1].value,
+        )
+        for rid, r in remaining:
+            if len(active_squad) >= 8:
+                break
+            active_squad.append(rid)
+            em_team_counts[r.team_abbr] = em_team_counts.get(r.team_abbr, 0) + 1
+            transfers.append(TransferAction(
+                action="buy",
+                rider_id=rid,
+                rider_name=r.name,
+                value=r.value,
+                fee=0,
+                reasoning="Emergency fill: ignoring fee constraint",
+            ))
         if len(active_squad) < 8:
             logging.warning(
-                "optimizer: could only fill %d/8 slots — insufficient budget or eligible riders",
+                "optimizer: could only fill %d/8 slots — insufficient eligible riders",
                 len(active_squad),
             )
 

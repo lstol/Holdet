@@ -861,3 +861,78 @@ class TestFormatBriefingTable:
         rm = {r.holdet_id: r for r in riders}
         output = format_briefing_table(all_recommendations, rm, flat_stage)
         assert "flat" in output.lower() or "FLAT" in output
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestEmptyTeamFill
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestEmptyTeamFill:
+    """Starting from an empty team, all 4 profiles must return exactly 8 riders."""
+
+    def test_optimizer_always_returns_8_riders(self):
+        """
+        With an empty my_team and 50M budget, all 4 profiles must fill exactly 8.
+        Uses 16 riders across 8 teams (2 per team) with a range of values so the
+        budget-aware fill and emergency fill paths are exercised.
+        """
+        # 16 riders, 8 teams × 2, values 1M–8M so even 8 cheap ones fit in 50M
+        riders = []
+        sim_results = {}
+        for i in range(1, 17):
+            team = f"T{(i - 1) // 2 + 1}"  # T1..T8, 2 riders each
+            value = (i % 8 + 1) * 1_000_000  # values cycle 1M–8M
+            r = Rider(
+                holdet_id=f"X{i}",
+                person_id=f"p{i}",
+                team_id=f"tid{team}",
+                name=f"Rider X{i}",
+                team=f"Team {team}",
+                team_abbr=team,
+                value=value,
+                start_value=value,
+                points=0,
+                status="active",
+                gc_position=None,
+                jerseys=[],
+                in_my_team=False,
+                is_captain=False,
+            )
+            riders.append(r)
+            sim_results[f"X{i}"] = SimResult(
+                rider_id=f"X{i}",
+                expected_value=50_000,
+                std_dev=20_000,
+                percentile_10=10_000,
+                percentile_50=50_000,
+                percentile_80=80_000,
+                percentile_90=100_000,
+                percentile_95=120_000,
+                p_positive=0.8,
+            )
+
+        stage = _flat_stage()
+
+        for profile in RiskProfile:
+            rec = optimize(
+                riders=riders,
+                my_team=[],          # empty — building from scratch
+                stage=stage,
+                probs={},
+                sim_results=sim_results,
+                bank=50_000_000,
+                risk_profile=profile,
+                rank=None,
+                total_participants=None,
+                stages_remaining=10,
+            )
+            # Reconstruct final squad from transfers
+            squad: set = set()
+            for t in rec.transfers:
+                if t.action == "buy":
+                    squad.add(t.rider_id)
+                elif t.action == "sell":
+                    squad.discard(t.rider_id)
+            assert len(squad) == 8, (
+                f"{profile.value}: expected 8 riders, got {len(squad)}"
+            )

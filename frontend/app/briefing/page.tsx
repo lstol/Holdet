@@ -117,7 +117,7 @@ export default function BriefingPage() {
   const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
-    const stored = sessionStorage.getItem('holdet_briefing_result')
+    const stored = localStorage.getItem('holdet_briefing_result')
     if (stored) {
       try {
         setBriefResult(JSON.parse(stored))
@@ -192,7 +192,7 @@ export default function BriefingPage() {
       const d = await res.json()
       if (!res.ok) throw new Error(d.detail ?? 'Brief failed')
       setBriefResult(d)
-      sessionStorage.setItem('holdet_briefing_result', JSON.stringify(d))
+      localStorage.setItem('holdet_briefing_result', JSON.stringify(d))
       setShowProfiles(true)
     } catch (e: unknown) {
       setBriefError(e instanceof Error ? e.message : 'Server not running? Start with: bash scripts/start_api.sh')
