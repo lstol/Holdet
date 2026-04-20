@@ -356,6 +356,52 @@ Deploy to Railway so holdet.syndikatet.eu works from any device.
 
 ---
 
+## Session 12 — Railway Hardening + Auth UX ✓ COMPLETE (2026-04-20)
+
+**Goal:** Fix all blocking issues preventing the Railway-deployed FastAPI server
+from ingesting and syncing correctly, and show a visible login prompt on gated
+frontend pages instead of a blank screen.
+
+**Fixes shipped:**
+
+1. **Railway `$PORT` binding** (`railway.json`)
+   - Start command was hardcoded to `--port 8000`; Railway injects a dynamic
+     `$PORT`. Changed to `--port ${PORT:-8000}`.
+
+2. **Session confirm URL returns 404** (`ingestion/api.py`)
+   - `/api/session` does not exist on the Holdet nexus API.
+   - Replaced `_SESSION_CONFIRM_URL` with `/api/games/612/players` — a confirmed
+     auth-gated endpoint (200 = session valid, 401/403 = failed).
+
+3. **Data files missing on Railway** (`api/server.py`, `data/.gitkeep`)
+   - `_load_state()` defaults changed to `current_stage=1`, `bank=50_000_000`
+     matching the actual race start values.
+   - `_save_state()` already creates `data/` via `os.makedirs` (confirmed, no
+     change needed).
+   - Added `data/.gitkeep` so the directory exists on fresh clones/Railway deploys.
+   - `.gitignore` was already correct (ignores `state.json`/`riders.json` only).
+
+4. **`sync_riders()` format mismatch** (`scripts/sync_to_supabase.py`)
+   - `save_riders()` writes a dict keyed by holdet_id, not a list or `{"riders": [...]}`.
+   - Added a third branch: `riders_list = list(raw.values())` as the fallback.
+
+5. **`user_id` missing in state on Railway** (`scripts/sync_to_supabase.py`)
+   - `sync_all()` now falls back to `os.getenv("HOLDET_USER_ID")` before giving up.
+   - Set `HOLDET_USER_ID` as a Railway env var to fix the silent sync no-op.
+
+6. **Frontend login prompt** (4 pages)
+   - Gated pages (`/briefing`, `/team`, `/riders`, `/history`) previously showed
+     a blank screen to logged-out users.
+   - Added `const [user, setUser] = useState<any>(null)` + `setUser(user)` in each
+     `useEffect` load function.
+   - JSX now shows an orange "Sign in" button before rendering any content when
+     `user` is null.
+   - `/stages` has no user gate — left unchanged.
+
+**No new tests added** (infrastructure/config fixes only).
+
+---
+
 ## Session Continuity Rules
 
 1. Start each session by reading README.md, RULES.md, ARCHITECTURE.md
