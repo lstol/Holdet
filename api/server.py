@@ -43,14 +43,13 @@ from output.tracker import record_stage_accuracy, save_accuracy
 def _load_state(path: str | None = None) -> dict:
     path = path or config.get_state_path()
     defaults: dict = {
-        "current_stage": 0,
-        "bank": config.INITIAL_BUDGET,
-        "rank": None,
-        "total_participants": None,
+        "current_stage": 1,
+        "bank": 50_000_000,
         "my_team": [],
         "captain": None,
         "stages_completed": [],
-        "probs_by_stage": {},
+        "rank": None,
+        "total_participants": None,
     }
     if not os.path.exists(path):
         return defaults
