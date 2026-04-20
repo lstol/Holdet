@@ -97,7 +97,13 @@ def sync_riders(client, race: str, user_id: str) -> int:
     raw = _load_json(RIDERS_JSON)
     if raw is None:
         return 0
-    riders_list = raw if isinstance(raw, list) else raw.get("riders", [])
+    if isinstance(raw, list):
+        riders_list = raw
+    elif isinstance(raw, dict) and "riders" in raw:
+        riders_list = raw["riders"]
+    else:
+        # save_riders() writes a dict keyed by holdet_id
+        riders_list = list(raw.values())
 
     rows = []
     for r in riders_list:
