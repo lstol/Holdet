@@ -6,6 +6,7 @@ Transfer count is an output of the optimizer, never an input constraint.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -260,29 +261,45 @@ def optimize(
     # ── Step 2: fill squad to 8 ──────────────────────────────────────────────
     if len(active_squad) < 8:
         team_counts = _count_teams(active_squad, rider_map)
-        candidates = sorted(
-            [(rid, r) for rid, r in eligible.items() if rid not in active_squad],
+        already_in: set = set(active_squad)
+
+        def _fill_from(candidates: list) -> None:
+            nonlocal remaining_budget
+            for buy_id, buy_rider in candidates:
+                if len(active_squad) >= 8:
+                    break
+                if buy_id in already_in:
+                    continue
+                if team_counts.get(buy_rider.team_abbr, 0) >= 2:
+                    continue
+                fee = _buy_fee(buy_rider.value)
+                if remaining_budget < buy_rider.value + fee:
+                    continue
+                active_squad.append(buy_id)
+                already_in.add(buy_id)
+                remaining_budget -= buy_rider.value + fee
+                team_counts[buy_rider.team_abbr] = team_counts.get(buy_rider.team_abbr, 0) + 1
+                transfers.append(TransferAction(
+                    action="buy",
+                    rider_id=buy_id,
+                    rider_name=buy_rider.name,
+                    value=buy_rider.value,
+                    fee=fee,
+                    reasoning="Fill squad slot",
+                ))
+
+        # Pass 1: best profile metric first (may skip expensive riders when budget is tight)
+        _fill_from(sorted(
+            [(rid, r) for rid, r in eligible.items() if rid not in already_in],
             key=lambda x: _profile_metric(sim_results[x[0]], risk_profile),
             reverse=True,
-        )
-        for buy_id, buy_rider in candidates:
-            if len(active_squad) >= 8:
-                break
-            if team_counts.get(buy_rider.team_abbr, 0) >= 2:
-                continue
-            fee = _buy_fee(buy_rider.value)
-            if remaining_budget < buy_rider.value + fee:
-                continue
-            active_squad.append(buy_id)
-            remaining_budget -= buy_rider.value + fee
-            team_counts[buy_rider.team_abbr] = team_counts.get(buy_rider.team_abbr, 0) + 1
-            transfers.append(TransferAction(
-                action="buy",
-                rider_id=buy_id,
-                rider_name=buy_rider.name,
-                value=buy_rider.value,
-                fee=fee,
-                reasoning="Replacement for unavailable team member",
+        ))
+
+        # Pass 2: if still short (budget exhausted expensive riders), fill with cheapest
+        if len(active_squad) < 8:
+            _fill_from(sorted(
+                [(rid, r) for rid, r in eligible.items() if rid not in already_in],
+                key=lambda x: x[1].value,
             ))
 
     # ── Step 3: greedy swap optimisation ────────────────────────────────────
@@ -369,6 +386,40 @@ def optimize(
                 reasoning=f"{risk_profile.value} metric gain {best_score:,.0f}",
             ),
         ])
+
+    # ── Fallback: last-resort fill if still < 8 after all steps ─────────────
+    if len(active_squad) < 8:
+        logging.warning(
+            "optimizer: squad has only %d riders after fill; topping up with cheapest eligible (budget=%.0f)",
+            len(active_squad), remaining_budget,
+        )
+        fb_team_counts = _count_teams(active_squad, rider_map)
+        for buy_id, buy_rider in sorted(eligible.items(), key=lambda x: x[1].value):
+            if len(active_squad) >= 8:
+                break
+            if buy_id in active_squad:
+                continue
+            if fb_team_counts.get(buy_rider.team_abbr, 0) >= 2:
+                continue
+            fee = _buy_fee(buy_rider.value)
+            if remaining_budget < buy_rider.value + fee:
+                continue
+            active_squad.append(buy_id)
+            remaining_budget -= buy_rider.value + fee
+            fb_team_counts[buy_rider.team_abbr] = fb_team_counts.get(buy_rider.team_abbr, 0) + 1
+            transfers.append(TransferAction(
+                action="buy",
+                rider_id=buy_id,
+                rider_name=buy_rider.name,
+                value=buy_rider.value,
+                fee=fee,
+                reasoning="Last-resort fill: cheapest eligible rider",
+            ))
+        if len(active_squad) < 8:
+            logging.warning(
+                "optimizer: could only fill %d/8 slots — insufficient budget or eligible riders",
+                len(active_squad),
+            )
 
     # ── Step 4: captain + aggregate metrics ──────────────────────────────────
     captain_id = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
