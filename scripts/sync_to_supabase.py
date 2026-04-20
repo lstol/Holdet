@@ -286,10 +286,32 @@ def sync_all(race: str = "giro_2026") -> dict:
     _load_env()
     state_raw = _load_json(STATE_JSON)
     if state_raw is None:
-        return {}
+        state_raw = {}
+
     user_id = state_raw.get("user_id")
     if not user_id:
+        # Fall back to fetching the first user via the Supabase admin API.
+        # On Railway, SUPABASE_SERVICE_KEY is set as an env var.
+        url = os.getenv("SUPABASE_URL")
+        service_key = os.getenv("SUPABASE_SERVICE_KEY")
+        if url and service_key:
+            try:
+                from supabase import create_client
+                admin_client = create_client(url, service_key)
+                response = admin_client.auth.admin.list_users()
+                if response and len(response) > 0:
+                    user_id = response[0].id
+                    # Cache back into state so subsequent calls don't repeat the lookup.
+                    state_raw["user_id"] = user_id
+                    STATE_JSON.parent.mkdir(parents=True, exist_ok=True)
+                    with open(STATE_JSON, "w") as f:
+                        json.dump(state_raw, f, indent=2)
+            except Exception:
+                pass
+
+    if not user_id:
         return {}
+
     client = _supabase_client()
     if client is None:
         return {}
