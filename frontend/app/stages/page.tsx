@@ -188,9 +188,21 @@ export default function StagesPage() {
                 <div className="bg-zinc-900 border border-zinc-700 rounded-b-xl -mt-1 p-4 space-y-4">
                   {s.image_url && (
                     <img src={s.image_url} alt={`Stage ${s.number} profile`}
-                      className="w-full rounded-lg max-h-40 object-cover" />
+                      className="max-h-48 w-full object-cover rounded-xl" />
                   )}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                    {s.distance_km != null && (
+                      <div><div className="text-zinc-500 text-xs">Distance</div><div className="text-zinc-200 font-medium">{s.distance_km.toFixed(1)}km</div></div>
+                    )}
+                    {s.vertical_meters != null && (
+                      <div><div className="text-zinc-500 text-xs">Vertical meters</div><div className="text-zinc-200 font-medium">{s.vertical_meters.toLocaleString('da-DK')}m</div></div>
+                    )}
+                    {s.start_location && (
+                      <div><div className="text-zinc-500 text-xs">Start</div><div className="text-zinc-200 font-medium">{s.start_location}</div></div>
+                    )}
+                    {s.finish_location && (
+                      <div><div className="text-zinc-500 text-xs">Finish</div><div className="text-zinc-200 font-medium">{s.finish_location}</div></div>
+                    )}
                     {s.profile_score != null && (
                       <div><div className="text-zinc-500 text-xs">ProfileScore</div><div className="text-zinc-200 font-medium">{s.profile_score}</div></div>
                     )}
@@ -199,9 +211,6 @@ export default function StagesPage() {
                     )}
                     {s.ps_final_25k != null && (
                       <div><div className="text-zinc-500 text-xs">PS final 25k</div><div className="text-zinc-200 font-medium">{s.ps_final_25k}</div></div>
-                    )}
-                    {s.distance_km != null && (
-                      <div><div className="text-zinc-500 text-xs">Distance</div><div className="text-zinc-200 font-medium">{s.distance_km.toFixed(1)}km</div></div>
                     )}
                   </div>
                   {s.notes && <p className="text-zinc-400 text-sm">{s.notes}</p>}

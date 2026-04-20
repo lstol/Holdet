@@ -1,6 +1,8 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase'
 
 const links = [
   { href: '/briefing', label: 'Briefing' },
@@ -12,6 +14,19 @@ const links = [
 
 export default function Nav() {
   const path = usePathname()
+  const [user, setUser] = useState<{ email?: string | null } | null>(null)
+
+  useEffect(() => {
+    const sb = createClient()
+    sb.auth.getUser().then(({ data }) => setUser(data.user))
+  }, [])
+
+  const handleSignOut = async () => {
+    const sb = createClient()
+    await sb.auth.signOut()
+    window.location.href = '/auth'
+  }
+
   return (
     <nav className="border-b border-zinc-800 bg-zinc-900 sticky top-0 z-50">
       <div className="max-w-5xl mx-auto px-4 flex items-center gap-1 h-12">
@@ -31,10 +46,24 @@ export default function Nav() {
             {l.label}
           </Link>
         ))}
-        <div className="ml-auto">
-          <Link href="/auth" className="text-xs text-zinc-500 hover:text-zinc-300">
-            Account
-          </Link>
+        <div className="ml-auto flex items-center gap-2">
+          {user ? (
+            <>
+              <span className="text-xs text-zinc-400">
+                {(user.email ?? '').slice(0, 20)}
+              </span>
+              <button
+                onClick={handleSignOut}
+                className="text-xs text-zinc-500 hover:text-zinc-300"
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <Link href="/auth" className="text-xs text-zinc-500 hover:text-zinc-300">
+              Sign in
+            </Link>
+          )}
         </div>
       </div>
     </nav>

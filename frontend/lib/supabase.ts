@@ -19,6 +19,7 @@ export type Stage = {
   profile_score: number | null
   ps_final_25k: number | null
   gradient_final_km: number | null
+  vertical_meters: number | null
   sprint_points: unknown[]
   kom_points: unknown[]
   notes: string | null

@@ -104,7 +104,7 @@ export default function RidersPage() {
           <button onClick={ingest} disabled={ingestLoading}
             className="flex items-center gap-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 rounded-lg text-sm font-medium transition-colors">
             <RefreshCw size={14} className={ingestLoading ? 'animate-spin' : ''} />
-            {ingestLoading ? 'Refreshing…' : 'Ingest'}
+            {ingestLoading ? 'Refreshing…' : 'Refresh Riders'}
           </button>
           {ingestMsg && (
             <span className={`text-xs ${ingestMsg.startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>{ingestMsg}</span>

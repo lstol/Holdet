@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { createClient, Rider, GameState } from '@/lib/supabase'
-import { RefreshCw, Users } from 'lucide-react'
+import { Users } from 'lucide-react'
 
 const RACE = 'giro_2026'
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
@@ -29,9 +29,6 @@ export default function TeamPage() {
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
 
-  // Sync state
-  const [syncing, setSyncing] = useState(false)
-  const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
@@ -89,24 +86,11 @@ export default function TeamPage() {
       setSaveMsg('✓ Team saved to state.json')
       setShowEditor(false)
     } catch (e: unknown) {
-      setSaveMsg(`✗ ${e instanceof Error ? e.message : 'Server not running?'}`)
+      const msg = `✗ ${e instanceof Error ? e.message : 'Server not running?'}`
+      setSaveMsg(msg)
+      console.error('saveTeam error:', e)
     } finally {
       setSaving(false)
-    }
-  }
-
-  const syncToSupabase = async () => {
-    setSyncing(true)
-    setSyncMsg(null)
-    try {
-      const res = await fetch(`${API}/sync`, { method: 'POST' })
-      const d = await res.json()
-      if (!res.ok) throw new Error(d.detail ?? 'Sync failed')
-      setSyncMsg(`✓ Synced — ${d.riders ?? 0} riders, ${d.stages ?? 0} stages`)
-    } catch (e: unknown) {
-      setSyncMsg(`✗ ${e instanceof Error ? e.message : 'Server not running?'}`)
-    } finally {
-      setSyncing(false)
     }
   }
 
@@ -143,17 +127,17 @@ export default function TeamPage() {
           <Users size={14} />
           Update My Team
         </button>
-        <button onClick={syncToSupabase} disabled={syncing}
-          className="flex items-center gap-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 rounded-lg text-sm font-medium transition-colors">
-          <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
-          {syncing ? 'Syncing…' : 'Sync to Supabase'}
-        </button>
-        {(saveMsg || syncMsg) && (
-          <span className={`text-xs ${(saveMsg ?? syncMsg ?? '').startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>
-            {saveMsg ?? syncMsg}
+        {saveMsg && (
+          <span className={`text-xs ${saveMsg.startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>
+            {saveMsg}
           </span>
         )}
       </div>
+      {riders.length === 0 && user && (
+        <p className="text-yellow-400 text-xs">
+          No riders loaded — run Refresh Riders on the Briefing page first.
+        </p>
+      )}
 
       {/* Team editor */}
       {showEditor && (

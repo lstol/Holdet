@@ -8,3 +8,9 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+[[redirects]]
+from = "http://holdet.syndikatet.eu/*"
+to = "https://holdet.syndikatet.eu/:splat"
+status = 301
+force = true

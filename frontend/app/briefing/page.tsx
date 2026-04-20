@@ -117,6 +117,18 @@ export default function BriefingPage() {
   const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
+    const stored = sessionStorage.getItem('holdet_briefing_result')
+    if (stored) {
+      try {
+        setBriefResult(JSON.parse(stored))
+        setShowProfiles(true)
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     async function load() {
       const { data: { user } } = await sb.auth.getUser()
       setUser(user)
@@ -180,6 +192,7 @@ export default function BriefingPage() {
       const d = await res.json()
       if (!res.ok) throw new Error(d.detail ?? 'Brief failed')
       setBriefResult(d)
+      sessionStorage.setItem('holdet_briefing_result', JSON.stringify(d))
       setShowProfiles(true)
     } catch (e: unknown) {
       setBriefError(e instanceof Error ? e.message : 'Server not running? Start with: bash scripts/start_api.sh')
@@ -447,16 +460,24 @@ export default function BriefingPage() {
                 return (
                   <div key={pk} className="text-xs space-y-1">
                     <p className={`font-semibold ${PROFILE_COLOURS[pk]}`}>{PROFILE_LABELS[pk]} transfers</p>
-                    {rec.transfers.map((t, i) => (
+                    {rec.transfers.map((t, i) => {
+                      const transferRider = riders.find(r => r.holdet_id === t.rider_id)
+                      return (
                       <div key={i} className="flex gap-2 text-zinc-400">
                         <span className={t.action === 'buy' ? 'text-green-400' : 'text-red-400'}>
                           {t.action === 'buy' ? '▲ BUY' : '▼ SELL'}
                         </span>
-                        <span className="text-zinc-200">{t.rider_name}</span>
+                        <span className="text-zinc-200">
+                          {t.rider_name}
+                          {transferRider?.team_abbr && (
+                            <span className="text-zinc-500 ml-1">{transferRider.team_abbr}</span>
+                          )}
+                        </span>
                         <span>{(t.value / 1e6).toFixed(1)}M</span>
                         {t.fee ? <span className="text-zinc-600">fee {fmtK(-t.fee)}</span> : null}
                       </div>
-                    ))}
+                      )
+                    })}
                     <p className="text-zinc-600 italic">{rec.reasoning}</p>
                   </div>
                 )
@@ -472,6 +493,7 @@ export default function BriefingPage() {
                 <thead>
                   <tr className="border-b border-zinc-700 text-zinc-500">
                     <th className="text-left py-1">Rider</th>
+                    <th className="text-left py-1 px-2">Team</th>
                     <th className="text-right py-1 px-2">EV</th>
                     <th className="text-right py-1 px-2">Floor p10</th>
                     <th className="text-right py-1 px-2">Ceiling p90</th>
@@ -480,19 +502,23 @@ export default function BriefingPage() {
                 <tbody>
                   {[...briefResult.team_sims]
                     .sort((a, b) => b.expected_value - a.expected_value)
-                    .map(s => (
+                    .map(s => {
+                      const riderData = riders.find(r => r.holdet_id === s.holdet_id)
+                      return (
                       <tr key={s.holdet_id} className="border-b border-zinc-800/40">
                         <td className="py-1 text-zinc-200">
                           {s.is_captain && <span className="text-yellow-400 mr-1">★</span>}
                           {s.name}
                         </td>
+                        <td className="py-1 px-2 text-zinc-500 text-xs">{riderData?.team_abbr ?? ''}</td>
                         <td className="py-1 px-2 text-right tabular-nums text-zinc-300">{fmtK(s.expected_value)}</td>
                         <td className={`py-1 px-2 text-right tabular-nums ${s.downside_10pct < 0 ? 'text-red-400' : 'text-green-400'}`}>
                           {fmtK(s.downside_10pct)}
                         </td>
                         <td className="py-1 px-2 text-right tabular-nums text-green-400">{fmtK(s.upside_90pct)}</td>
                       </tr>
-                    ))}
+                    )
+                    })}
                 </tbody>
               </table>
             </div>
