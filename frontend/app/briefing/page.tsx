@@ -306,7 +306,7 @@ export default function BriefingPage() {
       {/* Stage profile image */}
       {stage.image_url && (
         <img src={stage.image_url} alt={`Stage ${stage.number} profile`}
-          className="w-full rounded-xl border border-zinc-800 max-h-48 object-cover" />
+          className="w-full h-auto rounded-lg border border-zinc-800" />
       )}
 
       {/* DNS alert */}
