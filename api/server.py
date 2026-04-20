@@ -295,12 +295,9 @@ def post_ingest() -> dict:
     # Auto-sync to Supabase (best-effort)
     try:
         from scripts.sync_to_supabase import sync_all
-        sync_result = sync_all(race="giro_2026")
-        print(f"SYNC RESULT: {sync_result}", flush=True)
-    except Exception as e:
-        import traceback
-        print(f"SYNC ERROR: {e}", flush=True)
-        traceback.print_exc()
+        sync_all(race="giro_2026")
+    except Exception:
+        pass
 
     return {
         "riders_count": len(riders),
