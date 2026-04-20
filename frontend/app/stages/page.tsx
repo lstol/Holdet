@@ -188,7 +188,7 @@ export default function StagesPage() {
                 <div className="bg-zinc-900 border border-zinc-700 rounded-b-xl -mt-1 p-4 space-y-4">
                   {s.image_url && (
                     <img src={s.image_url} alt={`Stage ${s.number} profile`}
-                      className="max-h-48 w-full object-cover rounded-xl" />
+                      className="w-full h-auto rounded-lg" />
                   )}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                     {s.distance_km != null && (
