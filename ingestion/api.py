@@ -7,7 +7,7 @@ Primary data source. Confirmed working endpoint:
 Authentication: email/password via NextAuth credentials provider.
   1. GET  https://www.holdet.dk/api/auth/csrf          → csrfToken
   2. POST https://www.holdet.dk/api/auth/signin/credentials → session cookies
-  3. GET  https://nexus-app-fantasy-fargate.holdet.dk/api/session → confirm valid
+  3. GET  https://nexus-app-fantasy-fargate.holdet.dk/api/games/612/players → confirm valid (200 = ok, 401/403 = failed)
   On 401: re-authenticates automatically and retries once.
 
 One call returns:
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 _HOLDET_URL = "https://www.holdet.dk"
 _BASE_URL = "https://nexus-app-fantasy-fargate.holdet.dk"
-_SESSION_CONFIRM_URL = f"{_BASE_URL}/api/session"
+_SESSION_CONFIRM_URL = f"{_BASE_URL}/api/games/612/players"
 
 # Module-level session cache — call _reset_session() to force re-authentication.
 _cached_session: Optional[requests.Session] = None
