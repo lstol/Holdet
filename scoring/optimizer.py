@@ -262,8 +262,24 @@ def optimize(
     if len(active_squad) < 8:
         team_counts = _count_teams(active_squad, rider_map)
         already_in: set = set(active_squad)
+        building_from_scratch = len(active_squad) == 0
 
-        def _fill_from(candidates: list) -> None:
+        def _cheapest_n_eligible(n: int, exclude: set, tc: dict) -> int:
+            """Sum of the n cheapest eligible rider values not in exclude, respecting 2-per-team."""
+            costs: list = []
+            tc_copy = dict(tc)
+            for _, r in sorted(eligible.items(), key=lambda x: x[1].value):
+                if len(costs) >= n:
+                    break
+                if r.holdet_id in exclude:
+                    continue
+                if tc_copy.get(r.team_abbr, 0) >= 2:
+                    continue
+                costs.append(r.value + _buy_fee(r.value))
+                tc_copy[r.team_abbr] = tc_copy.get(r.team_abbr, 0) + 1
+            return sum(costs)
+
+        def _fill_from(candidates: list, budget_aware: bool = False) -> None:
             nonlocal remaining_budget
             for buy_id, buy_rider in candidates:
                 if len(active_squad) >= 8:
@@ -273,11 +289,20 @@ def optimize(
                 if team_counts.get(buy_rider.team_abbr, 0) >= 2:
                     continue
                 fee = _buy_fee(buy_rider.value)
-                if remaining_budget < buy_rider.value + fee:
+                cost = buy_rider.value + fee
+                if remaining_budget < cost:
                     continue
+                if budget_aware:
+                    slots_left = 8 - len(active_squad) - 1
+                    if slots_left > 0:
+                        min_cost_remaining = _cheapest_n_eligible(
+                            slots_left, already_in | {buy_id}, team_counts
+                        )
+                        if remaining_budget - cost < min_cost_remaining:
+                            continue
                 active_squad.append(buy_id)
                 already_in.add(buy_id)
-                remaining_budget -= buy_rider.value + fee
+                remaining_budget -= cost
                 team_counts[buy_rider.team_abbr] = team_counts.get(buy_rider.team_abbr, 0) + 1
                 transfers.append(TransferAction(
                     action="buy",
@@ -288,14 +313,17 @@ def optimize(
                     reasoning="Fill squad slot",
                 ))
 
-        # Pass 1: best profile metric first (may skip expensive riders when budget is tight)
-        _fill_from(sorted(
-            [(rid, r) for rid, r in eligible.items() if rid not in already_in],
-            key=lambda x: _profile_metric(sim_results[x[0]], risk_profile),
-            reverse=True,
-        ))
+        # Pass 1: best profile metric first, budget-aware when building from scratch
+        _fill_from(
+            sorted(
+                [(rid, r) for rid, r in eligible.items() if rid not in already_in],
+                key=lambda x: _profile_metric(sim_results[x[0]], risk_profile),
+                reverse=True,
+            ),
+            budget_aware=building_from_scratch,
+        )
 
-        # Pass 2: if still short (budget exhausted expensive riders), fill with cheapest
+        # Pass 2: if still short, fill with cheapest (catches topping up after forced sells)
         if len(active_squad) < 8:
             _fill_from(sorted(
                 [(rid, r) for rid, r in eligible.items() if rid not in already_in],

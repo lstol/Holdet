@@ -6,6 +6,12 @@ import { Users } from 'lucide-react'
 const RACE = 'giro_2026'
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
+function parseJsonField(val: unknown): string[] {
+  if (Array.isArray(val)) return val as string[]
+  if (typeof val === 'string') { try { return JSON.parse(val) } catch { return [] } }
+  return []
+}
+
 function fmt(v: number | null) {
   if (v == null) return '—'
   return v.toLocaleString('da-DK')
@@ -47,10 +53,7 @@ export default function TeamPage() {
         setGs(gsData)
 
         // Pre-populate editor with current team — my_team may come back as JSON string
-        const rawTeam = gsData?.my_team
-        const currentTeam: string[] = typeof rawTeam === 'string'
-          ? JSON.parse(rawTeam)
-          : (rawTeam ?? [])
+        const currentTeam = parseJsonField(gsData?.my_team)
         const currentCaptain = gsData?.captain ?? ''
         setSelectedIds(currentTeam)
         setCaptainId(currentCaptain)
@@ -61,9 +64,7 @@ export default function TeamPage() {
     load()
   }, [])
 
-  const myTeamIds: string[] = typeof gs?.my_team === 'string'
-    ? (() => { try { return JSON.parse(gs.my_team as string) } catch { return [] } })()
-    : (gs?.my_team ?? [])
+  const myTeamIds = parseJsonField(gs?.my_team)
   const teamRiders = riders.filter(r => myTeamIds.includes(r.holdet_id))
   const totalValue = teamRiders.reduce((s, r) => s + (r.value ?? 0), 0)
   const totalStart = teamRiders.reduce((s, r) => s + (r.start_value ?? 0), 0)

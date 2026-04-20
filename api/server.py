@@ -401,7 +401,7 @@ def post_brief(req: BriefRequest) -> dict:
         for rid in my_team if rid in all_sims
     ]
 
-    return {
+    resp: dict = {
         "stage_number": req.stage,
         "stage_type": stage.stage_type,
         "start_location": stage.start_location,
@@ -415,6 +415,9 @@ def post_brief(req: BriefRequest) -> dict:
         "team_sims": team_sims,
         "dns_alerts": dns_alerts,
     }
+    if not my_team:
+        resp["team_note"] = "No team picked yet — showing best team to select from scratch."
+    return resp
 
 
 @app.post("/settle")

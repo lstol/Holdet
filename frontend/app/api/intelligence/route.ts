@@ -17,11 +17,14 @@ Next stage: Stage ${stage_number} — ${start} → ${finish} (${stage_type}, ${d
 Profile: ProfileScore=${profile_score ?? 'N/A'}, gradient final km=${gradient_final_km ?? 'N/A'}%.
 My current team: ${my_team}.
 
-Search and read these sources for this stage:
-- https://sport.tv2.dk — find Emil Axelsgaard's stage ${stage_number} analysis for Giro 2026
-- https://inrng.com — find Giro 2026 stage ${stage_number} preview or race coverage
-- Search: "giro 2026 stage ${stage_number} ${finish} preview favourites"
-- Search: "giro 2026 stage ${stage_number} team tactics startlist"
+Search broadly for information about this stage. Use multiple searches:
+- Search: "giro 2026 stage ${stage_number} ${finish} preview"
+- Search: "giro 2026 stage ${stage_number} favourites tactics"
+- Search: "giro 2026 ${finish} cycling"
+- Search: "cyclingnews giro 2026 stage ${stage_number}"
+- Search: "inrng giro 2026 stage ${stage_number}"
+
+Synthesize what you find from any sources available — cycling news sites, race coverage, team announcements, rider interviews. Do not require specific named sources.
 
 Return ONLY a JSON object with no preamble, no markdown, no code blocks:
 {
@@ -53,7 +56,7 @@ Only include riders in rider_adjustments if you found specific information about
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 2000,
+        max_tokens: 4000,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: prompt }],
       }),

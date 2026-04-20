@@ -936,3 +936,93 @@ class TestEmptyTeamFill:
             assert len(squad) == 8, (
                 f"{profile.value}: expected 8 riders, got {len(squad)}"
             )
+
+    def test_optimizer_fills_8_from_real_budget(self):
+        """
+        Realistic budget scenario: one rider at 17.5M would eat 35% of the budget
+        alone. The budget-aware knapsack must still produce 8 riders for all profiles.
+        Rider pool: 1×17.5M, 2×10M, 3×9M, 5×8M, 10×5M, rest at 3M.
+        Budget: 50M. Empty team.
+        """
+        import itertools
+
+        raw_values = (
+            [17_500_000] * 1 +
+            [10_000_000] * 2 +
+            [9_000_000] * 3 +
+            [8_000_000] * 5 +
+            [5_000_000] * 10 +
+            [3_000_000] * 5   # 26 riders total, 13 teams × 2
+        )
+        riders = []
+        sim_results = {}
+        team_cycle = itertools.cycle([f"TM{i}" for i in range(1, 14)])
+        team_counts_local: dict = {}
+        for i, value in enumerate(raw_values, start=1):
+            # Assign to teams ensuring max 2 per team
+            while True:
+                team = next(team_cycle)
+                if team_counts_local.get(team, 0) < 2:
+                    team_counts_local[team] = team_counts_local.get(team, 0) + 1
+                    break
+            rid = f"RB{i}"
+            r = Rider(
+                holdet_id=rid,
+                person_id=f"p{i}",
+                team_id=f"tid{team}",
+                name=f"Rider {i}",
+                team=f"Team {team}",
+                team_abbr=team,
+                value=value,
+                start_value=value,
+                points=0,
+                status="active",
+                gc_position=None,
+                jerseys=[],
+                in_my_team=False,
+                is_captain=False,
+            )
+            riders.append(r)
+            sim_results[rid] = SimResult(
+                rider_id=rid,
+                expected_value=60_000,
+                std_dev=25_000,
+                percentile_10=20_000,
+                percentile_50=60_000,
+                percentile_80=90_000,
+                percentile_90=110_000,
+                percentile_95=150_000,
+                p_positive=0.8,
+            )
+
+        stage = _flat_stage()
+        for profile in RiskProfile:
+            rec = optimize(
+                riders=riders,
+                my_team=[],
+                stage=stage,
+                probs={},
+                sim_results=sim_results,
+                bank=50_000_000,
+                risk_profile=profile,
+                rank=None,
+                total_participants=None,
+                stages_remaining=10,
+            )
+            squad: set = set()
+            for t in rec.transfers:
+                if t.action == "buy":
+                    squad.add(t.rider_id)
+                elif t.action == "sell":
+                    squad.discard(t.rider_id)
+            assert len(squad) == 8, (
+                f"{profile.value}: expected 8 riders with real-budget pool, got {len(squad)}"
+            )
+            # Total value of squad must be ≤ 50M (fees are extra, but values alone must fit)
+            total_value = sum(
+                next(r.value for r in riders if r.holdet_id == rid)
+                for rid in squad
+            )
+            assert total_value <= 50_000_000, (
+                f"{profile.value}: squad value {total_value:,} exceeds 50M budget"
+            )

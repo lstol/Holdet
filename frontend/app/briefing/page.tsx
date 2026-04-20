@@ -80,6 +80,12 @@ type BriefResult = {
   dns_alerts: { name: string; status: string }[]
 }
 
+function parseJsonField(val: unknown): string[] {
+  if (Array.isArray(val)) return val as string[]
+  if (typeof val === 'string') { try { return JSON.parse(val) } catch { return [] } }
+  return []
+}
+
 const PROFILE_LABELS: Record<string, string> = {
   anchor:     'ANCHOR',
   balanced:   'BALANCED',
@@ -208,7 +214,7 @@ export default function BriefingPage() {
     setIntelligence(null)
     try {
       const myTeamNames = riders
-        .filter(r => gs.my_team?.includes(r.holdet_id))
+        .filter(r => myTeamIds.includes(r.holdet_id))
         .map(r => `${r.name} (${r.team})`)
         .join(', ')
       const res = await fetch('/api/intelligence', {
@@ -258,14 +264,16 @@ export default function BriefingPage() {
     }))
   }
 
+  const myTeamIds = parseJsonField(gs?.my_team)
+
   const dnsDNFTeamRiders = riders.filter(
-    r => gs?.my_team?.includes(r.holdet_id) && (r.status === 'dns' || r.status === 'dnf')
+    r => myTeamIds.includes(r.holdet_id) && (r.status === 'dns' || r.status === 'dnf')
   )
 
-  const teamRiders = riders.filter(r => gs?.my_team?.includes(r.holdet_id))
+  const teamRiders = riders.filter(r => myTeamIds.includes(r.holdet_id))
 
   const displayRiders = riders
-    .filter(r => gs?.my_team?.includes(r.holdet_id) || !!probs[r.holdet_id])
+    .filter(r => myTeamIds.includes(r.holdet_id) || !!probs[r.holdet_id])
     .sort((a, b) => (probs[b.holdet_id]?.p_win ?? 0) - (probs[a.holdet_id]?.p_win ?? 0))
 
   if (!user) return (
@@ -612,7 +620,7 @@ export default function BriefingPage() {
             <tbody>
               {displayRiders.map(r => {
                 const p = probs[r.holdet_id]
-                const inTeam = gs?.my_team?.includes(r.holdet_id)
+                const inTeam = myTeamIds.includes(r.holdet_id)
                 const isCaptain = gs?.captain === r.holdet_id
                 return (
                   <tr key={r.holdet_id}

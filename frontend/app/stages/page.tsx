@@ -6,6 +6,12 @@ import { CheckSquare } from 'lucide-react'
 const RACE = 'giro_2026'
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
+function parseJsonField(val: unknown): unknown[] {
+  if (Array.isArray(val)) return val
+  if (typeof val === 'string') { try { return JSON.parse(val) } catch { return [] } }
+  return []
+}
+
 function StageBadge({ type }: { type: string }) {
   const colours: Record<string, string> = {
     flat:     'bg-green-900 text-green-300',
@@ -156,7 +162,7 @@ export default function StagesPage() {
 
       <div className="grid grid-cols-1 gap-2">
         {stages.map(s => {
-          const completed = (gs?.stages_completed as number[] | undefined)?.includes(s.number)
+          const completed = (parseJsonField(gs?.stages_completed) as number[]).includes(s.number)
           const isCurrent = s.number === currentStage
           const result = results[s.number] as { finish_order?: string[] } | undefined
           const isSelected = selected?.id === s.id
