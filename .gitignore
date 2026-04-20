@@ -8,3 +8,4 @@ __pycache__/
 *.zip
 *.docx
 FIRST_SESSION_PROMPT.md
+.claude/
