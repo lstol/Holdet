@@ -402,6 +402,69 @@ frontend pages instead of a blank screen.
 
 ---
 
+## Session 13 — UI Fixes + Briefing Improvements ✓ COMPLETE (2026-04-22)
+
+**Goal:** Fix 9 UI/UX issues identified after Session 12 deployment, plus several
+post-session bug fixes discovered during live testing.
+
+**Fixes shipped:**
+
+1. **HTTPS hardening** (`frontend/next.config.ts`, `frontend/netlify.toml`)
+   - Added `Strict-Transport-Security: max-age=63072000` header via Next.js `headers()` config
+   - Added HTTP→HTTPS redirect in `netlify.toml` (`301 force`)
+
+2. **Nav auth state** (`frontend/components/Nav.tsx`)
+   - On mount, fetches current user via `supabase.auth.getUser()`
+   - Logged in: shows truncated email + "Sign out" button → clears session, redirects `/auth`
+   - Logged out: shows "Sign in" link
+
+3. **Button label** (`frontend/app/riders/page.tsx`)
+   - "Ingest" → "Refresh Riders"
+
+4. **Intelligence API improvements** (`frontend/app/api/intelligence/route.ts`)
+   - Model: `claude-sonnet-4-20250514` → `claude-sonnet-4-5`
+   - `max_tokens`: 2000 → 4000 (prevents response cutoff)
+   - Replaced narrow source requirements with 5 broad generic searches
+   - JSON extraction: regex for code fences before string replace fallback
+   - Hard prompt instruction: output bare `{...}` JSON only
+
+5. **Team name in briefing tables** (`frontend/app/briefing/page.tsx`)
+   - Team simulation table: added "Team" column via `rider.team_abbr`
+   - Per-profile transfer list: muted team abbreviation next to rider name
+
+6. **Sync to Supabase button removed** (`frontend/app/team/page.tsx`)
+   - Auto-sync already runs after every ingest/brief/settle on Railway
+
+7. **Update My Team error visibility** (`frontend/app/team/page.tsx`)
+   - `console.error` in `saveTeam()` catch block
+   - Yellow warning shown when `riders.length === 0 && user`
+
+8. **Stage profile images** (`frontend/app/stages/page.tsx`, `frontend/app/briefing/page.tsx`)
+   - Full-height image: `w-full h-auto rounded-lg` (removed `max-h-48 object-cover`)
+   - Added `vertical_meters`, `start_location`, `finish_location` to stage detail grid
+
+9. **Briefing result persistence** (`frontend/app/briefing/page.tsx`)
+   - `sessionStorage` → `localStorage` under key `holdet_briefing_result`
+   - Survives tab switches, browser close, and cross-session
+
+**Post-session bug fixes:**
+
+- **`parseJsonField` helper** — Supabase returns `my_team`, `stages_completed`,
+  `jerseys` as JSON strings in some paths. Added defensive helper applied across
+  `briefing`, `team`, `stages`, and `riders` pages.
+- **`sync_to_supabase.py`** — `my_team`, `stages_completed`, `jerseys` now stored
+  as native arrays (not `json.dumps` strings).
+- **Optimizer budget-aware knapsack fill** — when building from empty team, added
+  `_cheapest_n_eligible(slots_left)` budget reservation check before each pick,
+  plus emergency fill as last resort.
+- **`team_note` in brief response** (`api/server.py`) — `/brief` includes a note
+  when `my_team` is empty.
+- **`load()` error boundaries** — `team/page.tsx` `load()` wrapped in `try/catch`.
+
+**Tests:** 363/363 passing (+1 new optimizer test class with 2 tests).
+
+---
+
 ## Session Continuity Rules
 
 1. Start each session by reading README.md, RULES.md, ARCHITECTURE.md
