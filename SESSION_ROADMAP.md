@@ -462,6 +462,22 @@ post-session bug fixes discovered during live testing.
 
 ---
 
+## Session 15 — Team-Level Optimizer + Role Display + Probability Distribution ✓ COMPLETE (2026-04-22)
+
+**Goal:** Wire the optimizer to use team-level Monte Carlo simulation for squad evaluation.
+Add multi-role rider classification. Surface probability distributions and scenario stats in the frontend.
+
+**What was built:**
+- A1: `simulate_team()` captain fix — declared captain, not dynamic best performer
+- A2–A6: `_eval_team()` with memoization, `_team_metric()`, greedy + double-swap optimizer, hybrid EV+p95 candidate filtering
+- A7–A8: `ProfileRecommendation.team_result`, `scenario_stats` in `/brief`
+- B: `_rider_roles()` returning up to 3 roles, exposed in API `team_sims`
+- C: Frontend — `RoleBadge` pills (GC/Sprint/Climber/Breakaway/TT/Dom), `DistributionBar` (p10/p50/EV/p80/p95), team EV/p10/p80/p95 columns in 4-profile table, scenario stats line
+
+**407/407 tests passing (+16 new). See SESSION_15_SUMMARY.md.**
+
+---
+
 ## Session 14 — Simulation Layer Rebuild ✓ COMPLETE (2026-04-22)
 
 **Goal:** Replace rider-level Monte Carlo with stage-level simulation.
