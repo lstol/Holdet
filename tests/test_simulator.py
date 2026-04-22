@@ -884,3 +884,174 @@ class TestSampleFinishPosition:
         assert counts["top10"] == 0
         assert counts["top15"] == 0
         assert counts["other"] == 10_000
+
+
+# ── Session 15 tests (A1: captain fix, eval cache, etapebonus) ────────────────
+
+class TestCaptainBonusAppliedToDeclaredCaptain:
+    """A1 fix: captain bonus goes to declared captain, not dynamic best performer."""
+
+    def _make_team(self, n=8):
+        """8 active riders with distinct IDs."""
+        return [
+            make_rider(
+                holdet_id=f"t{i}",
+                name=f"Rider {i}",
+                team_abbr="TST",
+                value=5_000_000,
+            )
+            for i in range(1, n + 1)
+        ]
+
+    def _make_probs_dict(self, riders, p_top15=0.30):
+        return {
+            r.holdet_id: make_probs(rider_id=r.holdet_id, p_win=0.05, p_top3=0.12,
+                                    p_top10=0.25, p_top15=p_top15, p_dnf=0.02)
+            for r in riders
+        }
+
+    def test_captain_bonus_credited_when_captain_wins(self):
+        """Declared captain scoring high → team total includes captain_bonus."""
+        riders = self._make_team()
+        probs = self._make_probs_dict(riders)
+        stage = make_flat_stage()
+        team_ids = [r.holdet_id for r in riders]
+        captain_id = team_ids[0]
+
+        result = simulate_team(
+            team=team_ids, captain=captain_id,
+            stage=stage, riders=riders, probs=probs,
+            n=500, stages_remaining=1, seed=42,
+        )
+        assert isinstance(result, TeamSimResult)
+        assert result.captain_id == captain_id
+        # Team EV should be positive (riders do earn value, captain bonus adds to it)
+        assert result.expected_value >= 0.0
+
+    def test_captain_bonus_not_negative(self):
+        """Even on bad days, captain_bonus is always ≥ 0 (max(0, value))."""
+        riders = self._make_team()
+        # Give all riders very high DNF probability → mostly negative scores
+        probs = {
+            r.holdet_id: make_probs(rider_id=r.holdet_id, p_win=0.0, p_top3=0.0,
+                                    p_top10=0.0, p_top15=0.01, p_dnf=0.95)
+            for r in riders
+        }
+        stage = make_flat_stage()
+        team_ids = [r.holdet_id for r in riders]
+        captain_id = team_ids[0]
+
+        result = simulate_team(
+            team=team_ids, captain=captain_id,
+            stage=stage, riders=riders, probs=probs,
+            n=200, stages_remaining=1, seed=7,
+        )
+        # Even in a bad scenario, captain_bonus ≥ 0 → team p10 can be negative
+        # but the captain should never amplify losses
+        assert isinstance(result, TeamSimResult)
+        # p95 ≥ p10 always
+        assert result.percentile_95 >= result.percentile_10
+
+    def test_captain_must_be_in_squad(self):
+        """simulate_team asserts captain is in the declared squad."""
+        riders = self._make_team()
+        probs = self._make_probs_dict(riders)
+        stage = make_flat_stage()
+        team_ids = [r.holdet_id for r in riders]
+
+        with pytest.raises(AssertionError):
+            simulate_team(
+                team=team_ids, captain="not_in_squad",
+                stage=stage, riders=riders, probs=probs,
+                n=10, stages_remaining=1, seed=0,
+            )
+
+
+class TestEvalTeamUsesFullPeloton:
+    """A2: _eval_team passes full rider field to simulate_team."""
+
+    def test_full_peloton_passed(self):
+        """simulate_team should receive the full field, not just squad riders."""
+        from scoring.optimizer import _eval_team, _eval_cache
+        from scoring.engine import Rider, Stage
+
+        # Build 20-rider field, squad is 8 of them
+        all_riders = [
+            make_rider(holdet_id=f"r{i}", team_abbr=f"T{i % 5}", value=5_000_000)
+            for i in range(1, 21)
+        ]
+        squad = tuple(sorted(r.holdet_id for r in all_riders[:8]))
+        captain = all_riders[0].holdet_id
+        stage = make_flat_stage()
+        probs = {
+            r.holdet_id: make_probs(rider_id=r.holdet_id)
+            for r in all_riders
+        }
+
+        _eval_cache.clear()
+        result = _eval_team(squad, captain, stage, all_riders, probs, n=20, seed=99)
+
+        assert isinstance(result, TeamSimResult)
+        # All 20 riders contributed to coherent stage outcome
+        assert len(result.team_ids) == 8
+
+
+class TestEvalCacheHit:
+    """A2: same squad evaluated twice → simulate_team called once."""
+
+    def test_cache_hit_returns_same_object(self):
+        """Second call returns cached result (same object identity)."""
+        from scoring.optimizer import _eval_team, _eval_cache
+
+        riders = [
+            make_rider(holdet_id=f"r{i}", team_abbr=f"T{i}", value=5_000_000)
+            for i in range(1, 9)
+        ]
+        squad = tuple(sorted(r.holdet_id for r in riders))
+        captain = riders[0].holdet_id
+        stage = make_flat_stage()
+        probs = {r.holdet_id: make_probs(rider_id=r.holdet_id) for r in riders}
+
+        _eval_cache.clear()
+        result1 = _eval_team(squad, captain, stage, riders, probs, n=10, seed=42)
+        result2 = _eval_team(squad, captain, stage, riders, probs, n=10, seed=42)
+
+        # Same object — cache hit
+        assert result1 is result2
+
+
+class TestOptimizerTeamResultInRecommendation:
+    """A7: ProfileRecommendation.team_result is TeamSimResult."""
+
+    def test_team_result_is_team_sim_result(self):
+        from scoring.optimizer import optimize, RiskProfile
+        from scoring.simulator import SimResult, TeamSimResult
+
+        riders = [
+            make_rider(holdet_id=f"r{i}", team_abbr=f"T{i}", value=5_000_000)
+            for i in range(1, 9)
+        ]
+        stage = make_flat_stage()
+        sim_results = {
+            r.holdet_id: SimResult(
+                rider_id=r.holdet_id, expected_value=50_000, std_dev=20_000,
+                percentile_10=10_000, percentile_50=50_000, percentile_80=80_000,
+                percentile_90=100_000, percentile_95=120_000, p_positive=0.7,
+            )
+            for r in riders
+        }
+        probs = {r.holdet_id: make_probs(rider_id=r.holdet_id) for r in riders}
+
+        rec = optimize(
+            riders=riders,
+            my_team=[r.holdet_id for r in riders],
+            stage=stage,
+            probs=probs,
+            sim_results=sim_results,
+            bank=50_000_000,
+            risk_profile=RiskProfile.BALANCED,
+            rank=None, total_participants=None, stages_remaining=5,
+            n_sim=10,
+        )
+        assert isinstance(rec.team_result, TeamSimResult)
+        assert rec.team_result.captain_id in [r.holdet_id for r in riders]

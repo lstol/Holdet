@@ -69,6 +69,54 @@ def _clamp(v: float) -> float:
     return max(0.0, min(1.0, v))
 
 
+def _rider_roles(
+    rider: Rider,
+    stage: Stage,
+    probs: Optional[dict] = None,
+) -> list:
+    """
+    Multi-role classification returning up to 3 RiderRole strings (B1).
+
+    Unlike _rider_type (single role), this stacks roles where appropriate:
+    e.g. a superstar GC rider on a mountain stage gets ["gc_contender", "climber"].
+    """
+    roles = []
+    rp = probs.get(rider.holdet_id) if probs else None
+    v = rider.value
+    stype = stage.stage_type
+
+    # GC: primary if applicable
+    if (rider.gc_position is not None and rider.gc_position <= 20) or v > 12_000_000:
+        roles.append(RiderRole.GC_CONTENDER)
+
+    # Stage specialist — stacks with GC for high-value riders
+    if v > 14_000_000:
+        if stype == "flat" and RiderRole.SPRINTER not in roles:
+            roles.append(RiderRole.SPRINTER)
+        elif stype in ("mountain", "hilly") and RiderRole.CLIMBER not in roles:
+            roles.append(RiderRole.CLIMBER)
+    elif 8_000_000 <= v <= 14_000_000:
+        if stype == "flat" and RiderRole.GC_CONTENDER not in roles:
+            roles.append(RiderRole.SPRINTER)
+        elif stype in ("mountain", "hilly") and RiderRole.GC_CONTENDER not in roles:
+            roles.append(RiderRole.CLIMBER)
+    elif 5_000_000 <= v < 8_000_000:
+        if rp and rp.p_win > 0.05 and stype == "flat":
+            roles.append(RiderRole.SPRINTER)
+        else:
+            roles.append(RiderRole.BREAKAWAY)
+
+    # TT: additive for ITT/TTT
+    if stype in ("itt", "ttt") and v >= 8_000_000 and RiderRole.TT not in roles:
+        roles.append(RiderRole.TT)
+
+    # Domestique fallback — never empty
+    if not roles:
+        roles.append(RiderRole.DOMESTIQUE)
+
+    return roles[:3]
+
+
 def _rider_type(rider: Rider, stage: Stage) -> str:
     """
     Classify rider by GC position, value bracket, and stage type.

@@ -323,10 +323,13 @@ def simulate_team(
     team_riders = [rider_map[rid] for rid in team if rid in rider_map]
     totals = np.empty(n, dtype=float)
 
+    assert captain in (r.holdet_id for r in team_riders) or not team_riders, \
+        f"captain {captain!r} must be in declared squad"
+
     for sim_i in range(n):
         result = simulate_stage_outcome(stage, riders, probs, rng)
 
-        sim_values: list[float] = []
+        sim_values: dict[str, float] = {}
         etabonus = 0
         for rider in team_riders:
             vd = score_rider(
@@ -334,18 +337,15 @@ def simulate_team(
                 stage=stage,
                 result=result,
                 my_team=team,
-                captain="",  # no pre-selected captain; apply dynamically below
+                captain=captain,
                 stages_remaining=stages_remaining,
                 all_riders=all_riders_map,
             )
-            sim_values.append(float(vd.total_rider_value_delta))
+            sim_values[rider.holdet_id] = float(vd.total_rider_value_delta)
             etabonus = vd.etapebonus_bank_deposit  # same value for all; keep last
 
-        # Dynamic captain: best performer this sim gets their value mirrored to bank
-        best_val = max(sim_values) if sim_values else 0.0
-        captain_bank = max(0.0, best_val)
-
-        totals[sim_i] = sum(sim_values) + captain_bank + etabonus
+        captain_bonus = max(0.0, sim_values.get(captain, 0.0))
+        totals[sim_i] = sum(sim_values.values()) + captain_bonus + etabonus
 
     return TeamSimResult(
         team_ids=list(team),

@@ -46,6 +46,48 @@ function StageBadge({ type }: { type: string }) {
   )
 }
 
+const ROLE_COLOURS: Record<string, string> = {
+  GC:         'bg-indigo-900 text-indigo-300',
+  Sprinter:   'bg-green-900 text-green-300',
+  Climber:    'bg-red-900 text-red-300',
+  Breakaway:  'bg-yellow-900 text-yellow-300',
+  TT:         'bg-purple-900 text-purple-300',
+  Domestique: 'bg-zinc-700 text-zinc-400',
+}
+
+function RoleBadge({ role }: { role: string }) {
+  return (
+    <span className={`px-1 py-0.5 rounded text-xs font-medium ${ROLE_COLOURS[role] ?? 'bg-zinc-700 text-zinc-400'}`}>
+      {role}
+    </span>
+  )
+}
+
+function DistributionBar({ p10, p50, ev, p80, p95 }: { p10: number; p50: number; ev: number; p80: number; p95: number }) {
+  const min = Math.min(p10, 0)
+  const max = Math.max(p95, 1)
+  const range = max - min || 1
+  const pct = (v: number) => `${((v - min) / range) * 100}%`
+  const skewed = ev > p50
+  return (
+    <div className="relative h-2 w-32 bg-zinc-800 rounded overflow-hidden" title={`p10:${fmtK(p10)} p50:${fmtK(p50)} EV:${fmtK(ev)} p80:${fmtK(p80)} p95:${fmtK(p95)}`}>
+      {/* p10–p95 band */}
+      <div
+        className={`absolute h-full ${skewed ? 'bg-green-900/60' : 'bg-blue-900/60'}`}
+        style={{ left: pct(p10), width: `${((p95 - p10) / range) * 100}%` }}
+      />
+      {/* p10 marker */}
+      <div className="absolute h-full w-px bg-red-500/70" style={{ left: pct(p10) }} />
+      {/* p50 marker */}
+      <div className="absolute h-full w-px bg-zinc-400/70" style={{ left: pct(p50) }} />
+      {/* EV marker */}
+      <div className="absolute h-full w-0.5 bg-orange-400" style={{ left: pct(ev) }} />
+      {/* p95 marker */}
+      <div className="absolute h-full w-px bg-green-500/70" style={{ left: pct(p95) }} />
+    </div>
+  )
+}
+
 type IntelligenceResult = {
   stage_summary: string
   rider_adjustments: RiderAdjustment[]
@@ -63,6 +105,27 @@ type ProfileRec = {
   downside_10pct: number
   transfer_cost: number
   reasoning: string
+  team_ev: number | null
+  team_p10: number | null
+  team_p80: number | null
+  team_p95: number | null
+}
+
+type TeamSim = {
+  holdet_id: string
+  name: string
+  team_abbr: string
+  expected_value: number
+  downside_10pct: number
+  upside_90pct: number
+  is_captain: boolean
+  roles: string[]
+  percentile_10: number
+  percentile_50: number
+  percentile_80: number
+  percentile_90: number
+  percentile_95: number
+  p_positive: number
 }
 
 type BriefResult = {
@@ -76,8 +139,9 @@ type BriefResult = {
   suggested_profile: string | null
   suggested_profile_reason: string
   profiles: Record<string, ProfileRec>
-  team_sims: { holdet_id: string; name: string; expected_value: number; downside_10pct: number; upside_90pct: number; is_captain: boolean }[]
+  team_sims: TeamSim[]
   dns_alerts: { name: string; status: string }[]
+  scenario_stats: Record<string, number> | null
 }
 
 function parseJsonField(val: unknown): string[] {
@@ -404,6 +468,14 @@ export default function BriefingPage() {
             <p className="text-zinc-500 text-xs italic">{briefResult.suggested_profile_reason}</p>
           )}
 
+          {briefResult.scenario_stats && Object.keys(briefResult.scenario_stats).length > 0 && (
+            <p className="text-zinc-500 text-xs">
+              {Object.entries(briefResult.scenario_stats)
+                .map(([s, p]) => `${s.charAt(0).toUpperCase() + s.slice(1).replace('_', ' ')} ${Math.round((p as number) * 100)}%`)
+                .join(' · ')}
+            </p>
+          )}
+
           {/* DNS alerts from briefing */}
           {briefResult.dns_alerts.length > 0 && (
             <div className="bg-red-950 border border-red-800 rounded-lg p-2 text-sm text-red-300">
@@ -425,8 +497,10 @@ export default function BriefingPage() {
                   <tr className="border-b border-zinc-700 text-zinc-500">
                     <th className="text-left py-1.5 pr-3">Profile</th>
                     <th className="text-right py-1.5 px-2">EV</th>
-                    <th className="text-right py-1.5 px-2">Upside (p90)</th>
-                    <th className="text-right py-1.5 px-2">Floor (p10)</th>
+                    <th className="text-right py-1.5 px-2">Team EV</th>
+                    <th className="text-right py-1.5 px-2">Team p10</th>
+                    <th className="text-right py-1.5 px-2">Team p80</th>
+                    <th className="text-right py-1.5 px-2">Team p95</th>
                     <th className="text-right py-1.5 px-2">Fee</th>
                     <th className="text-left py-1.5 pl-2">Captain</th>
                   </tr>
@@ -443,10 +517,12 @@ export default function BriefingPage() {
                           {isSuggested && <span className="ml-1 text-zinc-500">◀</span>}
                         </td>
                         <td className="py-2 px-2 text-right tabular-nums text-zinc-200">{fmtK(rec.expected_value)}</td>
-                        <td className="py-2 px-2 text-right tabular-nums text-green-400">{fmtK(rec.upside_90pct)}</td>
-                        <td className={`py-2 px-2 text-right tabular-nums ${rec.downside_10pct < 0 ? 'text-red-400' : 'text-green-400'}`}>
-                          {fmtK(rec.downside_10pct)}
+                        <td className="py-2 px-2 text-right tabular-nums text-orange-400">{fmtK(rec.team_ev)}</td>
+                        <td className={`py-2 px-2 text-right tabular-nums ${(rec.team_p10 ?? 0) < 0 ? 'text-red-400' : 'text-green-400'}`}>
+                          {fmtK(rec.team_p10)}
                         </td>
+                        <td className="py-2 px-2 text-right tabular-nums text-green-400">{fmtK(rec.team_p80)}</td>
+                        <td className="py-2 px-2 text-right tabular-nums text-green-300">{fmtK(rec.team_p95)}</td>
                         <td className="py-2 px-2 text-right tabular-nums text-zinc-500">
                           {rec.transfer_cost ? fmtK(-rec.transfer_cost) : '—'}
                         </td>
@@ -502,31 +578,42 @@ export default function BriefingPage() {
                   <tr className="border-b border-zinc-700 text-zinc-500">
                     <th className="text-left py-1">Rider</th>
                     <th className="text-left py-1 px-2">Team</th>
+                    <th className="text-left py-1 px-2">Roles</th>
                     <th className="text-right py-1 px-2">EV</th>
-                    <th className="text-right py-1 px-2">Floor p10</th>
-                    <th className="text-right py-1 px-2">Ceiling p90</th>
+                    <th className="text-left py-1 px-2">Distribution</th>
+                    <th className="text-right py-1 px-2">p+</th>
                   </tr>
                 </thead>
                 <tbody>
                   {[...briefResult.team_sims]
                     .sort((a, b) => b.expected_value - a.expected_value)
-                    .map(s => {
-                      const riderData = riders.find(r => r.holdet_id === s.holdet_id)
-                      return (
+                    .map(s => (
                       <tr key={s.holdet_id} className="border-b border-zinc-800/40">
-                        <td className="py-1 text-zinc-200">
+                        <td className="py-1.5 text-zinc-200">
                           {s.is_captain && <span className="text-yellow-400 mr-1">★</span>}
                           {s.name}
                         </td>
-                        <td className="py-1 px-2 text-zinc-500 text-xs">{riderData?.team_abbr ?? ''}</td>
-                        <td className="py-1 px-2 text-right tabular-nums text-zinc-300">{fmtK(s.expected_value)}</td>
-                        <td className={`py-1 px-2 text-right tabular-nums ${s.downside_10pct < 0 ? 'text-red-400' : 'text-green-400'}`}>
-                          {fmtK(s.downside_10pct)}
+                        <td className="py-1.5 px-2 text-zinc-500">{s.team_abbr}</td>
+                        <td className="py-1.5 px-2">
+                          <div className="flex gap-1 flex-wrap">
+                            {(s.roles ?? []).map(role => <RoleBadge key={role} role={role} />)}
+                          </div>
                         </td>
-                        <td className="py-1 px-2 text-right tabular-nums text-green-400">{fmtK(s.upside_90pct)}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums text-orange-400">{fmtK(s.expected_value)}</td>
+                        <td className="py-1.5 px-2">
+                          <DistributionBar
+                            p10={s.percentile_10}
+                            p50={s.percentile_50}
+                            ev={s.expected_value}
+                            p80={s.percentile_80}
+                            p95={s.percentile_95}
+                          />
+                        </td>
+                        <td className="py-1.5 px-2 text-right tabular-nums text-zinc-400">
+                          {s.p_positive != null ? `${Math.round(s.p_positive * 100)}%` : '—'}
+                        </td>
                       </tr>
-                    )
-                    })}
+                    ))}
                 </tbody>
               </table>
             </div>

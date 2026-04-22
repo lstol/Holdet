@@ -32,8 +32,8 @@ from ingestion.api import get_session, fetch_riders, fetch_my_team, save_riders,
 from scoring.engine import (
     Rider, Stage, StageResult, SprintPoint, KOMPoint, score_rider,
 )
-from scoring.probabilities import generate_priors, save_probs
-from scoring.simulator import simulate_all_riders
+from scoring.probabilities import generate_priors, save_probs, _rider_roles
+from scoring.simulator import simulate_all_riders, STAGE_SCENARIOS
 from scoring.optimizer import optimize_all_profiles, suggest_profile
 from output.tracker import record_stage_accuracy, save_accuracy
 
@@ -151,6 +151,10 @@ def _serialize_profiles(profiles: dict, rider_map: dict[str, Rider]) -> dict:
                 td["rider_name"] = r.name if r else td["rider_id"]
             transfers.append(td)
         captain_name = rider_map.get(rec.captain, Rider.__new__(Rider)).name if rec.captain in rider_map else rec.captain
+        team_ev   = round(rec.team_result.expected_value) if rec.team_result else None
+        team_p10  = round(rec.team_result.percentile_10)  if rec.team_result else None
+        team_p80  = round(rec.team_result.percentile_80)  if rec.team_result else None
+        team_p95  = round(rec.team_result.percentile_95)  if rec.team_result else None
         out[key] = {
             "transfers": transfers,
             "captain": rec.captain,
@@ -160,6 +164,10 @@ def _serialize_profiles(profiles: dict, rider_map: dict[str, Rider]) -> dict:
             "downside_10pct": rec.downside_10pct,
             "transfer_cost": rec.transfer_cost,
             "reasoning": rec.reasoning,
+            "team_ev": team_ev,
+            "team_p10": team_p10,
+            "team_p80": team_p80,
+            "team_p95": team_p95,
         }
     return out
 
@@ -388,18 +396,30 @@ def post_brief(req: BriefRequest) -> dict:
         if rid in rider_map and rider_map[rid].status in ("dns", "dnf")
     ]
 
-    # Top riders by EV for quick overview
+    # Team sim summary with full percentile set + roles (C1, B2)
     team_sims = [
         {
             "holdet_id": rid,
             "name": rider_map[rid].name if rid in rider_map else rid,
-            "expected_value": round(all_sims[rid].expected_value),
-            "downside_10pct": round(all_sims[rid].percentile_10),
-            "upside_90pct": round(all_sims[rid].percentile_90),
-            "is_captain": rid == captain,
+            "team_abbr": rider_map[rid].team_abbr if rid in rider_map else "",
+            "roles": _rider_roles(rider_map[rid], stage, probs) if rid in rider_map else [],
+            "expected_value":  round(all_sims[rid].expected_value),
+            "percentile_10":   round(all_sims[rid].percentile_10),
+            "percentile_50":   round(all_sims[rid].percentile_50),
+            "percentile_80":   round(all_sims[rid].percentile_80),
+            "percentile_90":   round(all_sims[rid].percentile_90),
+            "percentile_95":   round(all_sims[rid].percentile_95),
+            "p_positive":      round(all_sims[rid].p_positive, 3),
+            "is_captain":      rid == captain,
+            # Legacy compat
+            "downside_10pct":  round(all_sims[rid].percentile_10),
+            "upside_90pct":    round(all_sims[rid].percentile_90),
         }
         for rid in my_team if rid in all_sims
     ]
+
+    # Scenario priors for the stage (A8)
+    scenario_stats = {s: p for s, p in STAGE_SCENARIOS.get(stage.stage_type, [])}
 
     resp: dict = {
         "stage_number": req.stage,
@@ -414,6 +434,7 @@ def post_brief(req: BriefRequest) -> dict:
         "profiles": _serialize_profiles(recommendations, rider_map),
         "team_sims": team_sims,
         "dns_alerts": dns_alerts,
+        "scenario_stats": scenario_stats,
     }
     if not my_team:
         resp["team_note"] = "No team picked yet — showing best team to select from scratch."

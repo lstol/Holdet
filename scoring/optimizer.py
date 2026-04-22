@@ -3,17 +3,23 @@ scoring/optimizer.py — Transfer and captain recommendations across all 4 risk 
 
 Profiles are defined by SQUAD COMPOSITION OBJECTIVE, not transfer count.
 Transfer count is an output of the optimizer, never an input constraint.
+
+Session 15: greedy swap loop is now wired to team-level simulation via
+_eval_team() with memoization. n=500, seed=42 fixed within each optimize()
+call for stable comparisons. Performance note: 400+ unique squad evaluations
+at n=500 can take several minutes — acceptable for a pre-race decision tool.
 """
 from __future__ import annotations
 
 import logging
+import random
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
 from scoring.engine import Rider, Stage
 from scoring.probabilities import RiderProb
-from scoring.simulator import SimResult
+from scoring.simulator import SimResult, TeamSimResult, simulate_team
 
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
@@ -47,12 +53,18 @@ class ProfileRecommendation:
     downside_10pct: float
     transfer_cost: int
     reasoning: str
+    team_result: Optional[TeamSimResult] = field(default=None)
+
+
+# ── Module-level eval cache (cleared at start of each optimize() call) ─────────
+
+_eval_cache: dict = {}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _profile_metric(sim: SimResult, profile: RiskProfile) -> float:
-    """Primary optimisation metric for this profile."""
+    """Primary optimisation metric for this profile (per-rider SimResult)."""
     if profile == RiskProfile.ANCHOR:
         return sim.percentile_10
     elif profile == RiskProfile.BALANCED:
@@ -61,6 +73,42 @@ def _profile_metric(sim: SimResult, profile: RiskProfile) -> float:
         return sim.percentile_80
     else:  # ALL_IN
         return sim.percentile_95
+
+
+def _team_metric(result: TeamSimResult, profile: RiskProfile) -> float:
+    """Primary optimisation metric for this profile (team TeamSimResult)."""
+    if profile == RiskProfile.ANCHOR:
+        return result.percentile_10
+    elif profile == RiskProfile.BALANCED:
+        return result.expected_value
+    elif profile == RiskProfile.AGGRESSIVE:
+        return result.percentile_80
+    else:  # ALL_IN
+        return result.percentile_95
+
+
+def _eval_team(
+    squad_ids: tuple,
+    captain_id: str,
+    stage: Stage,
+    all_riders: list,
+    probs: dict,
+    n: int = 500,
+    seed: int = 42,
+) -> TeamSimResult:
+    """Evaluate a squad via team Monte Carlo simulation, with memoization."""
+    key = (squad_ids, captain_id)
+    if key not in _eval_cache:
+        _eval_cache[key] = simulate_team(
+            team=list(squad_ids),
+            captain=captain_id,
+            stage=stage,
+            riders=all_riders,
+            probs=probs,
+            n=n,
+            seed=seed,
+        )
+    return _eval_cache[key]
 
 
 def _is_gc_anchor(rider: Rider) -> bool:
@@ -83,6 +131,101 @@ def _count_teams(squad_ids: list, rider_map: dict) -> dict:
     return counts
 
 
+def _constraints_ok(
+    squad_ids: list,
+    rider_map: dict,
+    budget: float,
+    fee_for_buys: int = 0,
+) -> bool:
+    """Check team-count constraint (≤2 per team) and budget."""
+    team_counts: dict = {}
+    for sid in squad_ids:
+        r = rider_map.get(sid)
+        if r:
+            tc = team_counts.get(r.team_abbr, 0) + 1
+            if tc > 2:
+                return False
+            team_counts[r.team_abbr] = tc
+    return budget >= fee_for_buys
+
+
+def _build_candidates(eligible: dict, sim_results: dict) -> list:
+    """
+    Hybrid EV + p95 union candidate filter (A6).
+    Returns up to ~50 rider ids from eligible active riders.
+    """
+    if len(eligible) <= 60:
+        return list(eligible.keys())
+    top_ev  = sorted(eligible, key=lambda r: sim_results[r].expected_value if r in sim_results else 0, reverse=True)[:25]
+    top_p95 = sorted(eligible, key=lambda r: sim_results[r].percentile_95 if r in sim_results else 0, reverse=True)[:25]
+    return list(set(top_ev) | set(top_p95))
+
+
+def _try_double_swaps(
+    active_squad: list,
+    candidates: list,
+    current_metric: float,
+    current_result: TeamSimResult,
+    profile: RiskProfile,
+    stage: Stage,
+    all_riders: list,
+    probs: dict,
+    rider_map: dict,
+    sim_results: dict,
+    remaining_budget: float,
+    n: int = 500,
+    n_attempts: int = 20,
+) -> Optional[tuple]:
+    """
+    Random double-swap exploration after greedy convergence (A5).
+    Returns (proposed_squad, new_captain) if 1%+ improvement found, else None.
+    """
+    threshold = 0.01 * abs(current_metric)
+    eligible_outside = [c for c in candidates if c not in active_squad]
+    if len(eligible_outside) < 2 or len(active_squad) < 2:
+        return None
+
+    for _ in range(n_attempts):
+        try:
+            sell_pair = random.sample(active_squad, 2)
+            buy_pair  = random.sample(eligible_outside, 2)
+        except ValueError:
+            break
+
+        # ANCHOR: never sell GC top-10 riders or jersey holders
+        if profile == RiskProfile.ANCHOR:
+            if any(
+                _is_gc_anchor(rider_map[s]) or rider_map[s].jerseys
+                for s in sell_pair if s in rider_map
+            ):
+                continue
+
+        proposed = [
+            buy_pair[sell_pair.index(r)] if r in sell_pair else r
+            for r in active_squad
+        ]
+
+        # Check team constraint + budget
+        buy_cost = sum(_buy_fee(rider_map[b].value) for b in buy_pair if b in rider_map)
+        sell_credits = sum(rider_map[s].value for s in sell_pair if s in rider_map)
+        new_budget = remaining_budget + sell_credits - sum(
+            rider_map[b].value + _buy_fee(rider_map[b].value)
+            for b in buy_pair if b in rider_map
+        )
+        if new_budget < 0:
+            continue
+        if not _constraints_ok(proposed, rider_map, new_budget):
+            continue
+
+        proposed_t = tuple(sorted(proposed))
+        proposed_captain = _pick_captain(proposed, sim_results, profile, rider_map)
+        result = _eval_team(proposed_t, proposed_captain, stage, all_riders, probs, n=n, seed=42)
+        if _team_metric(result, profile) > current_metric + threshold:
+            return (proposed, proposed_captain, sell_pair, buy_pair)
+
+    return None
+
+
 def _eval_swap(
     profile: RiskProfile,
     gain: float,
@@ -94,9 +237,13 @@ def _eval_swap(
     """
     Evaluate whether a swap is acceptable under the profile's transfer logic.
     Returns a score (higher = better) if acceptable, else None.
+
+    With team-level simulation:
+      buy_ev  = proposed team expected_value
+      sell_ev = current team expected_value
+      gain    = _team_metric(proposed) - _team_metric(current)
     """
     if profile == RiskProfile.ANCHOR:
-        # Only transfer if replacement strictly improves p10 net of fee amortised
         fee_per_stage = fee / max(stages_remaining, 1)
         effective_gain = gain - fee_per_stage
         if effective_gain <= 0:
@@ -104,15 +251,13 @@ def _eval_swap(
         return effective_gain
 
     elif profile == RiskProfile.BALANCED:
-        # Transfer if EV gain exceeds fee / stages_remaining
         ev_gain = buy_ev - sell_ev
         threshold = fee / max(stages_remaining, 1)
         if ev_gain <= threshold:
             return None
-        return gain  # rank by primary metric gain
+        return gain
 
     elif profile == RiskProfile.AGGRESSIVE:
-        # Accept if primary metric (p80) improves; allow up to -30k EV if p80 gain >= 80k
         if gain <= 0:
             return None
         ev_change = buy_ev - sell_ev
@@ -121,7 +266,6 @@ def _eval_swap(
         return gain
 
     else:  # ALL_IN
-        # Optimise purely for p95; fee payback is secondary
         if gain <= 0:
             return None
         return gain
@@ -133,25 +277,21 @@ def _pick_captain(
     profile: RiskProfile,
     rider_map: dict,
 ) -> str:
-    """Select captain per profile rules."""
+    """Select captain per profile rules using per-rider SimResult."""
     eligible_ids = [rid for rid in squad_ids if rid in sim_results]
     if not eligible_ids:
         return squad_ids[0] if squad_ids else ""
 
     if profile == RiskProfile.ANCHOR:
-        # Rider with highest floor (p10)
         return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_10)
 
     elif profile == RiskProfile.BALANCED:
-        # Rider with highest EV
         return max(eligible_ids, key=lambda rid: sim_results[rid].expected_value)
 
     elif profile == RiskProfile.AGGRESSIVE:
-        # Rider with highest ceiling (p95)
         return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_95)
 
     else:  # ALL_IN
-        # Rider with highest ceiling (p95)
         return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_95)
 
 
@@ -204,27 +344,28 @@ def optimize(
     rank: Optional[int],
     total_participants: Optional[int],
     stages_remaining: int,
+    n_sim: int = 500,
 ) -> ProfileRecommendation:
     """
     Find the optimal squad for the given risk profile.
 
-    Algorithm:
-      1. Forced sells: remove DNS/DNF riders from squad, collect credits.
-      2. Fill: pad squad to 8 with best-metric eligible riders if needed.
-      3. Greedy swaps: iteratively find the best single swap that improves the
-         profile metric and passes the profile's transfer acceptance logic.
-      4. Captain: select per profile rules.
+    Algorithm (Session 15):
+      1. Forced sells: remove DNS/DNF riders, collect credits.
+      2. Fill: pad squad to 8 with best-metric eligible riders.
+      3. Build candidate pool: hybrid EV+p95 union (~50 riders, A6).
+      4. Greedy swaps: team-level simulation via _eval_team() with memoization.
+      5. Double-swap exploration: random 2-for-2 after greedy convergence (A5).
+      6. Captain: selected per profile using per-rider SimResult (A3).
+      7. Final team_result: TeamSimResult stored on ProfileRecommendation (A7).
 
-    Constraints (always enforced):
-      - Exactly 8 riders in squad
-      - Max 2 riders from same team_abbr
-      - Total spend net of sell credits ≤ bank
-      - No DNS/DNF riders bought
-      - Captain is one of the 8 active riders
+    n_sim : simulations per team evaluation (default 500). Lower values (50–200)
+            trade accuracy for speed during optimization.
     """
+    global _eval_cache
+    _eval_cache.clear()
+
     rider_map: dict = {r.holdet_id: r for r in riders}
 
-    # Eligible riders: active status + pre-computed sim result available
     eligible: dict = {
         rid: r
         for rid, r in rider_map.items()
@@ -260,7 +401,6 @@ def optimize(
         building_from_scratch = len(active_squad) == 0
 
         def _cheapest_n_eligible(n: int, exclude: set, tc: dict) -> int:
-            """Sum of the n cheapest eligible rider values not in exclude, respecting 2-per-team."""
             costs: list = []
             tc_copy = dict(tc)
             for _, r in sorted(eligible.items(), key=lambda x: x[1].value):
@@ -274,9 +414,9 @@ def optimize(
                 tc_copy[r.team_abbr] = tc_copy.get(r.team_abbr, 0) + 1
             return sum(costs)
 
-        def _fill_from(candidates: list, budget_aware: bool = False) -> None:
+        def _fill_from(candidates_list: list, budget_aware: bool = False) -> None:
             nonlocal remaining_budget
-            for buy_id, buy_rider in candidates:
+            for buy_id, buy_rider in candidates_list:
                 if len(active_squad) >= 8:
                     break
                 if buy_id in already_in:
@@ -308,7 +448,6 @@ def optimize(
                     reasoning="Fill squad slot",
                 ))
 
-        # Pass 1: best profile metric first, budget-aware when building from scratch
         _fill_from(
             sorted(
                 [(rid, r) for rid, r in eligible.items() if rid not in already_in],
@@ -318,41 +457,45 @@ def optimize(
             budget_aware=building_from_scratch,
         )
 
-        # Pass 2: if still short, fill with cheapest (catches topping up after forced sells)
         if len(active_squad) < 8:
             _fill_from(sorted(
                 [(rid, r) for rid, r in eligible.items() if rid not in already_in],
                 key=lambda x: x[1].value,
             ))
 
-    # ── Step 3: greedy swap optimisation ────────────────────────────────────
-    for _iter in range(20):  # at most 20 swaps per optimisation pass
+    # ── Step 3: build candidate pool (A6) ───────────────────────────────────
+    candidates = _build_candidates(eligible, sim_results)
+
+    # ── Step 4: greedy swap — team-level (A4) ────────────────────────────────
+    current_captain = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
+    current_result = _eval_team(
+        tuple(sorted(active_squad)), current_captain, stage, riders, probs, n=n_sim, seed=42,
+    )
+    current_metric = _team_metric(current_result, risk_profile)
+
+    for _iter in range(20):
         best_swap = None
-        best_score = 0.0  # must improve strictly above 0 to trigger
+        best_score = 0.0
 
         for sell_id in list(active_squad):
             sell_rider = rider_map.get(sell_id)
             if sell_rider is None:
                 continue
 
-            # ANCHOR: never sell GC top-10 or jersey holders
             if risk_profile == RiskProfile.ANCHOR:
                 if _is_gc_anchor(sell_rider) or sell_rider.jerseys:
                     continue
-
-            sell_metric = (
-                _profile_metric(sim_results[sell_id], risk_profile)
-                if sell_id in sim_results else 0.0
-            )
-            sell_ev = sim_results[sell_id].expected_value if sell_id in sim_results else 0.0
 
             after_sell_budget = remaining_budget + sell_rider.value
             team_counts_without = _count_teams(
                 [sid for sid in active_squad if sid != sell_id], rider_map
             )
 
-            for buy_id, buy_rider in eligible.items():
+            for buy_id in candidates:
                 if buy_id in active_squad:
+                    continue
+                buy_rider = rider_map.get(buy_id)
+                if buy_rider is None:
                     continue
                 if team_counts_without.get(buy_rider.team_abbr, 0) >= 2:
                     continue
@@ -361,15 +504,20 @@ def optimize(
                 if after_sell_budget < buy_rider.value + fee:
                     continue
 
-                buy_metric = _profile_metric(sim_results[buy_id], risk_profile)
-                buy_ev = sim_results[buy_id].expected_value
-                gain = buy_metric - sell_metric
+                proposed = tuple(sorted(
+                    [buy_id if r == sell_id else r for r in active_squad]
+                ))
+                proposed_captain = _pick_captain(list(proposed), sim_results, risk_profile, rider_map)
+                proposed_result = _eval_team(
+                    proposed, proposed_captain, stage, riders, probs, n=n_sim, seed=42,
+                )
+                gain = _team_metric(proposed_result, risk_profile) - current_metric
 
                 score = _eval_swap(
                     profile=risk_profile,
                     gain=gain,
-                    buy_ev=buy_ev,
-                    sell_ev=sell_ev,
+                    buy_ev=proposed_result.expected_value,
+                    sell_ev=current_result.expected_value,
                     fee=fee,
                     stages_remaining=stages_remaining,
                 )
@@ -410,7 +558,60 @@ def optimize(
             ),
         ])
 
-    # ── Fallback: last-resort fill if still < 8 after all steps ─────────────
+        current_captain = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
+        current_result = _eval_team(
+            tuple(sorted(active_squad)), current_captain, stage, riders, probs, n=n_sim, seed=42,
+        )
+        current_metric = _team_metric(current_result, risk_profile)
+
+    # ── Step 5: double-swap exploration (A5) ─────────────────────────────────
+    double_result = _try_double_swaps(
+        active_squad=active_squad,
+        candidates=candidates,
+        current_metric=current_metric,
+        current_result=current_result,
+        profile=risk_profile,
+        stage=stage,
+        all_riders=riders,
+        probs=probs,
+        rider_map=rider_map,
+        sim_results=sim_results,
+        remaining_budget=remaining_budget,
+        n=n_sim,
+    )
+    if double_result is not None:
+        proposed_squad, proposed_captain, sell_pair, buy_pair = double_result
+        for s, b in zip(sell_pair, buy_pair):
+            sell_rider = rider_map[s]
+            buy_rider  = rider_map[b]
+            fee = _buy_fee(buy_rider.value)
+            remaining_budget += sell_rider.value
+            remaining_budget -= buy_rider.value + fee
+            transfers.extend([
+                TransferAction(
+                    action="sell",
+                    rider_id=s,
+                    rider_name=sell_rider.name,
+                    value=sell_rider.value,
+                    fee=0,
+                    reasoning=f"Double-swap: sold to improve {risk_profile.value}",
+                ),
+                TransferAction(
+                    action="buy",
+                    rider_id=b,
+                    rider_name=buy_rider.name,
+                    value=buy_rider.value,
+                    fee=fee,
+                    reasoning=f"Double-swap: bought to improve {risk_profile.value}",
+                ),
+            ])
+        active_squad = proposed_squad
+        current_captain = proposed_captain
+        current_result = _eval_team(
+            tuple(sorted(active_squad)), current_captain, stage, riders, probs, n=n_sim, seed=42,
+        )
+
+    # ── Fallback: last-resort fill if still < 8 ──────────────────────────────
     if len(active_squad) < 8:
         logging.warning(
             "optimizer: squad has only %d riders after fill; topping up with cheapest eligible (budget=%.0f)",
@@ -439,7 +640,6 @@ def optimize(
                 reasoning="Last-resort fill: cheapest eligible rider",
             ))
 
-    # ── Emergency fill: ignore fees, just get to 8 ───────────────────────────
     if len(active_squad) < 8:
         logging.warning("Emergency fill triggered — could not reach 8 riders normally")
         em_team_counts = _count_teams(active_squad, rider_map)
@@ -470,9 +670,15 @@ def optimize(
                 len(active_squad),
             )
 
-    # ── Step 4: captain + aggregate metrics ──────────────────────────────────
+    # ── Step 6: captain + final team result (A7) ─────────────────────────────
     captain_id = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
 
+    # Final team result — n_sim sims with fixed seed for the accepted squad
+    team_result = _eval_team(
+        tuple(sorted(active_squad)), captain_id, stage, riders, probs, n=n_sim, seed=42,
+    )
+
+    # Legacy per-rider aggregate metrics (kept for backward compatibility)
     total_ev = sum(
         sim_results[rid].expected_value for rid in active_squad if rid in sim_results
     )
@@ -494,6 +700,7 @@ def optimize(
         downside_10pct=total_p10,
         transfer_cost=total_cost,
         reasoning=_build_reasoning(risk_profile, active_squad, rider_map, n_transfers, stage),
+        team_result=team_result,
     )
 
 
@@ -509,6 +716,7 @@ def optimize_all_profiles(
     rank: Optional[int],
     total_participants: Optional[int],
     stages_remaining: int,
+    n_sim: int = 500,
 ) -> dict:
     """Run all 4 profiles in one pass. Returns dict[RiskProfile, ProfileRecommendation]."""
     return {
@@ -523,6 +731,7 @@ def optimize_all_profiles(
             rank=rank,
             total_participants=total_participants,
             stages_remaining=stages_remaining,
+            n_sim=n_sim,
         )
         for profile in RiskProfile
     }
@@ -620,7 +829,6 @@ def format_briefing_table(
         if r is None:
             return rec.captain[:10]
         parts = r.name.split()
-        # "Vingegaard J." style
         if len(parts) >= 2:
             return f"{parts[-1][:8]} {parts[0][0]}."
         return r.name[:10]

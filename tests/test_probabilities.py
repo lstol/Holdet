@@ -14,7 +14,7 @@ import pytest
 from scoring.engine import Rider, Stage, SprintPoint, KOMPoint
 from scoring.probabilities import (
     RiderProb, RiderRole, generate_priors, interactive_adjust, save_probs, load_probs,
-    _rider_type,
+    _rider_type, _rider_roles,
 )
 
 
@@ -518,3 +518,110 @@ class TestRoleStageMatrix:
         probs = generate_priors(riders, make_stage("flat"))
         # rank 21 SPRINTER flat: 0.45 × 0.6 = 0.27
         assert probs["r21"].p_top15 == pytest.approx(0.45 * 0.6, abs=0.01)
+
+
+# ── Session 15 tests (B: multi-role classification) ───────────────────────────
+
+def _make_rider_b(holdet_id="r1", value=10_000_000, gc_position=None, jerseys=None):
+    return Rider(
+        holdet_id=holdet_id, person_id="p1", team_id="t1",
+        name="Test Rider", team="Team", team_abbr="TST",
+        value=value, start_value=value, points=0, status="active",
+        gc_position=gc_position, jerseys=jerseys or [],
+        in_my_team=False, is_captain=False,
+    )
+
+
+def _make_stage_b(stage_type="flat", number=1):
+    return Stage(
+        number=number, race="test", stage_type=stage_type,
+        distance_km=180.0, is_ttt=False,
+        start_location="A", finish_location="B",
+        sprint_points=[], kom_points=[],
+    )
+
+
+class TestMultiRoleClassification:
+    """Session 15 B1: _rider_roles() returns correct multi-role lists."""
+
+    def test_gc_climber_on_mountain(self):
+        """High-value GC top-10 on mountain → [gc_contender, climber]."""
+        rider = _make_rider_b(value=15_000_000, gc_position=5)
+        stage = _make_stage_b("mountain")
+        roles = _rider_roles(rider, stage)
+        assert RiderRole.GC_CONTENDER in roles
+        assert RiderRole.CLIMBER in roles
+
+    def test_sprinter_only_mid_value_flat(self):
+        """Mid-value flat rider not in GC → [sprinter]."""
+        rider = _make_rider_b(value=10_000_000, gc_position=None)
+        stage = _make_stage_b("flat")
+        roles = _rider_roles(rider, stage)
+        assert RiderRole.SPRINTER in roles
+        assert RiderRole.GC_CONTENDER not in roles
+
+    def test_gc_only_no_stage_type_match(self):
+        """GC top-10 with moderate value on flat → gc_contender, not climber."""
+        rider = _make_rider_b(value=13_000_000, gc_position=8)
+        stage = _make_stage_b("flat")
+        roles = _rider_roles(rider, stage)
+        assert RiderRole.GC_CONTENDER in roles
+
+    def test_tt_specialist_on_itt(self):
+        """High-value rider on ITT → tt role included."""
+        rider = _make_rider_b(value=10_000_000, gc_position=None)
+        stage = _make_stage_b("itt")
+        roles = _rider_roles(rider, stage)
+        assert RiderRole.TT in roles
+
+    def test_tt_stacks_with_gc_on_itt(self):
+        """GC + high value on ITT → both gc_contender and tt."""
+        rider = _make_rider_b(value=15_000_000, gc_position=3)
+        stage = _make_stage_b("itt")
+        roles = _rider_roles(rider, stage)
+        assert RiderRole.GC_CONTENDER in roles
+        assert RiderRole.TT in roles
+
+    def test_roles_never_empty(self):
+        """Low-value, no GC rider → always at least [domestique]."""
+        rider = _make_rider_b(value=2_000_000, gc_position=None)
+        stage = _make_stage_b("flat")
+        roles = _rider_roles(rider, stage)
+        assert len(roles) >= 1
+        assert RiderRole.DOMESTIQUE in roles
+
+    def test_breakaway_for_mid_value_non_flat(self):
+        """Mid-value (5-8M) on mountain, no GC, no high p_win → breakaway."""
+        rider = _make_rider_b(value=6_000_000, gc_position=None)
+        stage = _make_stage_b("mountain")
+        roles = _rider_roles(rider, stage, probs=None)
+        assert RiderRole.BREAKAWAY in roles
+
+    def test_probabilistic_reclassify_to_sprinter(self):
+        """Mid-value flat rider with p_win > 0.05 → sprinter, not breakaway."""
+        rider = _make_rider_b(value=6_000_000, gc_position=None)
+        stage = _make_stage_b("flat")
+        probs = {
+            "r1": RiderProb(
+                rider_id="r1", stage_number=1,
+                p_win=0.08, p_top3=0.20, p_top10=0.35, p_top15=0.45,
+                p_dnf=0.01,
+            )
+        }
+        roles = _rider_roles(rider, stage, probs=probs)
+        assert RiderRole.SPRINTER in roles
+        assert RiderRole.BREAKAWAY not in roles
+
+    def test_max_three_roles(self):
+        """Result is never more than 3 roles."""
+        rider = _make_rider_b(value=16_000_000, gc_position=2)
+        stage = _make_stage_b("mountain")
+        roles = _rider_roles(rider, stage)
+        assert len(roles) <= 3
+
+    def test_domestique_returned_for_very_low_value(self):
+        """Rider below 5M threshold → domestique."""
+        rider = _make_rider_b(value=3_000_000, gc_position=None)
+        stage = _make_stage_b("flat")
+        roles = _rider_roles(rider, stage)
+        assert RiderRole.DOMESTIQUE in roles

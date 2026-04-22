@@ -42,7 +42,8 @@ from scoring.optimizer import (
     _count_teams,
     _eval_swap,
 )
-from scoring.simulator import SimResult
+from scoring.probabilities import RiderProb
+from scoring.simulator import SimResult, TeamSimResult
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -186,18 +187,64 @@ def stages_remaining():
     return 10
 
 
-@pytest.fixture
-def all_recommendations(riders, mountain_squad_ids, flat_stage, sim_results, bank, stages_remaining):
+def _build_pool():
+    """Build the shared 16-rider pool for module-scoped fixtures."""
+    mountain_squad_ids = [f"R{i}" for i in range(1, 9)]
+    mountain_teams = ["TEAM_A", "TEAM_A", "TEAM_B", "TEAM_B",
+                      "TEAM_C", "TEAM_C", "TEAM_D", "TEAM_D"]
+    sprint_teams   = ["TEAM_E", "TEAM_E", "TEAM_F", "TEAM_F",
+                      "TEAM_G", "TEAM_G", "TEAM_H", "TEAM_H"]
+    pool = []
+    for i, (rid, team) in enumerate(zip(mountain_squad_ids, mountain_teams), start=1):
+        pool.append(_make_rider(rid, team, gc_position=i))
+    for sid, team in zip([f"S{i}" for i in range(1, 9)], sprint_teams):
+        pool.append(_make_rider(sid, team, gc_position=None))
+    sr = {}
+    for rid in mountain_squad_ids:
+        sr[rid] = _mountain_sim(rid)
+    for i in range(1, 9):
+        sr[f"S{i}"] = _sprinter_sim(f"S{i}")
+    return pool, mountain_squad_ids, sr
+
+
+@pytest.fixture(scope="module")
+def all_recommendations():
+    """
+    Module-scoped (computed once). probs={} so all riders equal in simulation.
+    n_sim=10 for speed. Used for schema/constraint tests.
+    """
+    pool, squad_ids, sr = _build_pool()
+    stage = _flat_stage()
     return optimize_all_profiles(
-        riders=riders,
-        my_team=mountain_squad_ids,
-        stage=flat_stage,
-        probs={},
-        sim_results=sim_results,
-        bank=bank,
-        rank=5000,
-        total_participants=100_000,
-        stages_remaining=stages_remaining,
+        riders=pool, my_team=squad_ids, stage=stage, probs={}, sim_results=sr,
+        bank=50_000_000.0, rank=5000, total_participants=100_000, stages_remaining=10,
+        n_sim=10,
+    )
+
+
+@pytest.fixture(scope="module")
+def behaviour_recs():
+    """
+    Module-scoped. Proper probs: sprinters dominant on flat (p_top15=0.45 vs 0.08).
+    n_sim=50 for reliable directional results. Used by TestProfileBehaviour.
+    """
+    pool, squad_ids, sr = _build_pool()
+    stage = _flat_stage()
+    probs = {}
+    for r in pool:
+        is_sprint = r.gc_position is None
+        probs[r.holdet_id] = RiderProb(
+            rider_id=r.holdet_id, stage_number=stage.number,
+            p_win=0.05 if is_sprint else 0.002,
+            p_top3=0.15 if is_sprint else 0.008,
+            p_top10=0.35 if is_sprint else 0.04,
+            p_top15=0.45 if is_sprint else 0.08,
+            p_dnf=0.01,
+        )
+    return optimize_all_profiles(
+        riders=pool, my_team=squad_ids, stage=stage, probs=probs, sim_results=sr,
+        bank=50_000_000.0, rank=5000, total_participants=100_000, stages_remaining=10,
+        n_sim=50,
     )
 
 
@@ -432,6 +479,7 @@ class TestConstraints:
             rank=None,
             total_participants=None,
             stages_remaining=stages_remaining,
+            n_sim=10,
         )
         final_squad = set(my_team)
         for t in rec.transfers:
@@ -513,61 +561,53 @@ class TestProfileBehaviour:
     def _transfer_count(self, rec):
         return sum(1 for t in rec.transfers if t.action == "buy")
 
-    def test_anchor_makes_zero_transfers_due_to_gc_protection(
-        self, riders, mountain_squad_ids, flat_stage, sim_results, bank, stages_remaining, all_recommendations
-    ):
+    def test_anchor_makes_zero_transfers_due_to_gc_protection(self, behaviour_recs):
         """ANCHOR protects all GC top-10 riders → 0 voluntary transfers."""
-        rec = all_recommendations[RiskProfile.ANCHOR]
+        rec = behaviour_recs[RiskProfile.ANCHOR]
         assert self._transfer_count(rec) == 0
 
-    def test_all_in_makes_more_transfers_than_anchor(
-        self, riders, mountain_squad_ids, flat_stage, sim_results, bank, stages_remaining, all_recommendations
-    ):
-        anchor_count = self._transfer_count(all_recommendations[RiskProfile.ANCHOR])
-        allin_count = self._transfer_count(all_recommendations[RiskProfile.ALL_IN])
+    def test_all_in_makes_more_transfers_than_anchor(self, behaviour_recs):
+        anchor_count = self._transfer_count(behaviour_recs[RiskProfile.ANCHOR])
+        allin_count = self._transfer_count(behaviour_recs[RiskProfile.ALL_IN])
         assert allin_count > anchor_count, (
             f"ALL_IN transfers ({allin_count}) should exceed ANCHOR ({anchor_count})"
         )
 
-    def test_aggressive_makes_more_transfers_than_anchor(
-        self, riders, mountain_squad_ids, flat_stage, sim_results, bank, stages_remaining, all_recommendations
-    ):
-        anchor_count = self._transfer_count(all_recommendations[RiskProfile.ANCHOR])
-        agg_count = self._transfer_count(all_recommendations[RiskProfile.AGGRESSIVE])
+    def test_aggressive_makes_more_transfers_than_anchor(self, behaviour_recs):
+        anchor_count = self._transfer_count(behaviour_recs[RiskProfile.ANCHOR])
+        agg_count = self._transfer_count(behaviour_recs[RiskProfile.AGGRESSIVE])
         assert agg_count > anchor_count, (
             f"AGGRESSIVE transfers ({agg_count}) should exceed ANCHOR ({anchor_count})"
         )
 
-    def test_all_in_squad_has_more_sprinters_than_anchor(
-        self, riders, mountain_squad_ids, flat_stage, sim_results, bank, stages_remaining, all_recommendations
-    ):
-        anchor_squad = self._final_squad(mountain_squad_ids, all_recommendations[RiskProfile.ANCHOR])
-        allin_squad = self._final_squad(mountain_squad_ids, all_recommendations[RiskProfile.ALL_IN])
-        anchor_sprinters = self._sprinter_count(anchor_squad, riders)
-        allin_sprinters = self._sprinter_count(allin_squad, riders)
+    def test_all_in_squad_has_more_sprinters_than_anchor(self, behaviour_recs):
+        pool, squad_ids, _ = _build_pool()
+        anchor_squad = self._final_squad(squad_ids, behaviour_recs[RiskProfile.ANCHOR])
+        allin_squad  = self._final_squad(squad_ids, behaviour_recs[RiskProfile.ALL_IN])
+        anchor_sprinters = self._sprinter_count(anchor_squad, pool)
+        allin_sprinters  = self._sprinter_count(allin_squad, pool)
         assert allin_sprinters > anchor_sprinters, (
             f"ALL_IN sprinters ({allin_sprinters}) should exceed ANCHOR ({anchor_sprinters})"
         )
 
-    def test_anchor_squad_has_more_gc_riders_than_all_in(
-        self, riders, mountain_squad_ids, flat_stage, sim_results, bank, stages_remaining, all_recommendations
-    ):
-        anchor_squad = self._final_squad(mountain_squad_ids, all_recommendations[RiskProfile.ANCHOR])
-        allin_squad = self._final_squad(mountain_squad_ids, all_recommendations[RiskProfile.ALL_IN])
-        anchor_gc = self._gc_rider_count(anchor_squad, riders)
-        allin_gc = self._gc_rider_count(allin_squad, riders)
+    def test_anchor_squad_has_more_gc_riders_than_all_in(self, behaviour_recs):
+        pool, squad_ids, _ = _build_pool()
+        anchor_squad = self._final_squad(squad_ids, behaviour_recs[RiskProfile.ANCHOR])
+        allin_squad  = self._final_squad(squad_ids, behaviour_recs[RiskProfile.ALL_IN])
+        anchor_gc = self._gc_rider_count(anchor_squad, pool)
+        allin_gc  = self._gc_rider_count(allin_squad, pool)
         assert anchor_gc > allin_gc, (
             f"ANCHOR GC riders ({anchor_gc}) should exceed ALL_IN ({allin_gc})"
         )
 
-    def test_all_in_upside_exceeds_anchor_upside(self, all_recommendations):
-        anchor = all_recommendations[RiskProfile.ANCHOR]
-        allin = all_recommendations[RiskProfile.ALL_IN]
+    def test_all_in_upside_exceeds_anchor_upside(self, behaviour_recs):
+        anchor = behaviour_recs[RiskProfile.ANCHOR]
+        allin  = behaviour_recs[RiskProfile.ALL_IN]
         assert allin.upside_90pct > anchor.upside_90pct
 
-    def test_anchor_floor_exceeds_all_in_floor(self, all_recommendations):
-        anchor = all_recommendations[RiskProfile.ANCHOR]
-        allin = all_recommendations[RiskProfile.ALL_IN]
+    def test_anchor_floor_exceeds_all_in_floor(self, behaviour_recs):
+        anchor = behaviour_recs[RiskProfile.ANCHOR]
+        allin  = behaviour_recs[RiskProfile.ALL_IN]
         assert anchor.downside_10pct > allin.downside_10pct
 
 
@@ -629,6 +669,7 @@ class TestAnchorRealisticFixtures:
             rank=None,
             total_participants=None,
             stages_remaining=stages_remaining,
+            n_sim=10,
         )
         sold_ids = {t.rider_id for t in rec.transfers if t.action == "sell"}
         assert "R1" in sold_ids, (
@@ -689,7 +730,7 @@ class TestCaptainSelection:
             riders=riders, my_team=my_team, stage=flat_stage, probs={},
             sim_results=sim_results, bank=50_000_000,
             risk_profile=RiskProfile.ANCHOR, rank=None, total_participants=None,
-            stages_remaining=10,
+            stages_remaining=10, n_sim=10,
         )
         assert rec.captain == "R1"  # R1 has highest p10 (floor)
 
@@ -726,7 +767,7 @@ class TestCaptainSelection:
             riders=riders, my_team=my_team, stage=flat_stage, probs={},
             sim_results=sim_results, bank=50_000_000,
             risk_profile=RiskProfile.ALL_IN, rank=None, total_participants=None,
-            stages_remaining=10,
+            stages_remaining=10, n_sim=10,
         )
         assert rec.captain == "S1"
 
