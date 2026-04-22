@@ -334,25 +334,22 @@ Deploy to Railway so holdet.syndikatet.eu works from any device.
 
 ---
 
-## Session 11 — Auto-Login + Live Validation (after Giro start May 9)
+## Session 11 — Auto-Login + Validate Scaffolding ✓ COMPLETE (2026-04-20)
 
-**Goal:**
-- Implement automatic Holdet login so Railway server never needs manual cookie updates
-- Live engine validation against real Holdet stage results (Part B from Session 9)
+**Goal:** Replace manual cookie with email/password auto-login. Scaffold 
+live engine validation for after Giro start May 9.
 
-**Auto-login flow:**
-- GET https://www.holdet.dk/api/auth/csrf → csrfToken
-- POST https://www.holdet.dk/api/auth/signin/credentials
-- body: { email, password, csrfToken }
-- GET https://nexus-app-fantasy-fargate.holdet.dk/api/session → confirm valid
-- On 401 from any endpoint → re-authenticate automatically
-- Credentials from HOLDET_EMAIL + HOLDET_PASSWORD env vars (never hardcoded)
+**What was built:**
+- `ingestion/api.py` — 3-step NextAuth login (GET /csrf → POST /signin → confirm)
+- `get_session()` — module-level cached session with auto-retry on 401
+- `_SESSION_CONFIRM_URL` changed to `/api/games/612/players` (confirmed working)
+- `config.py` — `get_cookie()` removed; `get_email()` + `get_password()` added
+- `api/server.py` + `main.py` — all cookie refs replaced with `get_session()`
+- `main.py validate --stage N` — compares engine delta vs actual Holdet delta
+- `tests/test_autologin.py` — 12 tests
+- `tests/test_validate.py` — 7 tests
 
-**Live validation (after May 9):**
-- Run settle for each completed stage
-- Compare engine ValueDelta vs actual Holdet value changes
-- Log discrepancies in tests/validation_log.md
-- Fix engine bugs before trusting optimizer output
+**361/361 tests passing. See SESSION_11_SUMMARY.md.**
 
 ---
 
@@ -462,6 +459,60 @@ post-session bug fixes discovered during live testing.
 - **`load()` error boundaries** — `team/page.tsx` `load()` wrapped in `try/catch`.
 
 **Tests:** 363/363 passing (+1 new optimizer test class with 2 tests).
+
+---
+
+## Session 14 — Simulation Layer Rebuild ← NEXT
+
+**Goal:** Replace rider-level Monte Carlo with stage-level simulation.
+Current simulate_rider() produces independent draws which breaks etapebonus,
+team bonus, and captain bonus — these only work correctly at team level.
+
+**What to build:**
+
+### simulate_stage_outcome(stage, riders, probs) → StageResult
+1. Sample scenario based on stage type:
+   - flat:     bunch_sprint=0.65, reduced_sprint=0.20, breakaway=0.15
+   - hilly:    bunch_sprint=0.25, reduced_sprint=0.25, breakaway=0.30, gc_day=0.20
+   - mountain: gc_day=0.70, breakaway=0.25, reduced_sprint=0.05
+   - itt/ttt:  deterministic
+2. Adjust rider weights conditionally on scenario:
+   - bunch_sprint → boost sprinters, suppress GC riders
+   - gc_day → boost climbers/GC, suppress sprinters
+   - breakaway → boost domestiques/attackers
+3. Sample finish order via Plackett-Luce (weighted sampling without replacement)
+   Guarantees: 1 winner, no duplicates, valid top-15
+4. Assign sprint/KOM points consistent with scenario
+5. Return full StageResult
+
+### simulate_team(team, captain, stage, riders, probs, n=5000) → TeamSimResult
+For each of n simulations:
+- result = simulate_stage_outcome(...)
+- score all 8 team riders against result using score_rider()
+- apply captain bonus dynamically (best performer in that simulation)
+- sum total team value incl. etapebonus (once), team bonus
+Return: EV, p10, p80, p95 at TEAM level
+
+### Optimizer uses team-level simulation
+- ANCHOR:     maximize team p10
+- BALANCED:   maximize team EV
+- AGGRESSIVE: maximize team p80
+- ALL_IN:     maximize team p95
+
+Captain selected per profile:
+- ANCHOR:     rider with highest floor (p10)
+- BALANCED:   rider with highest EV
+- AGGRESSIVE/ALL_IN: rider with highest ceiling (p95)
+
+**Sanity checks required:**
+- Flat stage: sprinters dominate team p95, GC riders stabilize p10
+- Mountain stage: GC riders dominate all percentiles
+- ALL_IN produces meaningfully wider distribution than ANCHOR
+- Etapebonus visible: team EV > sum of individual rider EVs
+
+**Do not build in Session 14:**
+- Multi-stage transfer planning (Session 15)
+- Improved probability inputs (Session 15)
 
 ---
 
