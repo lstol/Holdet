@@ -462,6 +462,21 @@ post-session bug fixes discovered during live testing.
 
 ---
 
+## Session 15-Fixes — Cache Key, Threshold, Role Precedence, Etapebonus Diagnostics ✓ COMPLETE (2026-04-22)
+
+**Goal:** Five targeted fixes to Session 15 — no new features, no scope creep.
+
+**What was fixed:**
+- Fix 1: `_eval_team` enforces `tuple(sorted(squad_ids))` key internally — removes implicit caller contract
+- Fix 2: `NOISE_FLOOR = 20_000` constant; `_eval_swap` and `_try_double_swaps` use `max(1% × metric, NOISE_FLOOR)` — prevents noise acceptance when metric is small
+- Fix 3: `_rider_roles()` restructured with `specialist_assigned` flag — probability signal overrides value bracket, no duplicates possible
+- Fix 4: `TeamSimResult.etapebonus_ev` + `etapebonus_p95`; exposed in API and as "Eta EV" column in 4-profile frontend table
+- Fix 5: `scenario_stats` → `scenario_priors` in API + frontend
+
+**415/415 tests passing (+8 new). See SESSION_15_FIXES_SUMMARY.md.**
+
+---
+
 ## Session 15 — Team-Level Optimizer + Role Display + Probability Distribution ✓ COMPLETE (2026-04-22)
 
 **Goal:** Wire the optimizer to use team-level Monte Carlo simulation for squad evaluation.
