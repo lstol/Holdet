@@ -462,7 +462,7 @@ post-session bug fixes discovered during live testing.
 
 ---
 
-## Session 14 — Simulation Layer Rebuild ← NEXT
+## Session 14 — Simulation Layer Rebuild ✓ COMPLETE (2026-04-22)
 
 **Goal:** Replace rider-level Monte Carlo with stage-level simulation.
 Current simulate_rider() produces independent draws which breaks etapebonus,

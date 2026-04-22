@@ -662,8 +662,8 @@ class TestCaptainSelection:
             p_positive=0.7,
         )
 
-    def test_anchor_captain_has_highest_ev(self, flat_stage):
-        # R1 has highest EV; all are GC top-10 (protected), no transfers → captain from current squad
+    def test_anchor_captain_has_highest_p10(self, flat_stage):
+        # R1 has highest p10 (floor); all are GC top-10 (protected), no transfers → captain from current squad
         riders = [
             _make_rider("R1", "TEAM_A", gc_position=1),
             _make_rider("R2", "TEAM_A", gc_position=2),
@@ -675,7 +675,7 @@ class TestCaptainSelection:
             _make_rider("R8", "TEAM_D", gc_position=8),
         ]
         sim_results = {
-            "R1": self._make_varied_sim("R1", ev=100_000, std_dev=20_000, p10=10_000, p50=100_000, p80=150_000, p90=180_000, p95=200_000),
+            "R1": self._make_varied_sim("R1", ev=100_000, std_dev=20_000, p10=30_000, p50=100_000, p80=150_000, p90=180_000, p95=200_000),
             "R2": self._make_varied_sim("R2", ev=60_000, std_dev=15_000, p10=20_000, p50=60_000, p80=80_000, p90=90_000, p95=100_000),
             "R3": self._make_varied_sim("R3", ev=40_000, std_dev=10_000, p10=15_000, p50=40_000, p80=55_000, p90=65_000, p95=70_000),
             "R4": self._make_varied_sim("R4", ev=40_000, std_dev=10_000, p10=15_000, p50=40_000, p80=55_000, p90=65_000, p95=70_000),
@@ -691,7 +691,7 @@ class TestCaptainSelection:
             risk_profile=RiskProfile.ANCHOR, rank=None, total_participants=None,
             stages_remaining=10,
         )
-        assert rec.captain == "R1"  # R1 has highest EV
+        assert rec.captain == "R1"  # R1 has highest p10 (floor)
 
     def test_all_in_captain_has_highest_p95(self, flat_stage):
         # Small squad where one rider has clearly highest p95

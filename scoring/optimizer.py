@@ -139,24 +139,19 @@ def _pick_captain(
         return squad_ids[0] if squad_ids else ""
 
     if profile == RiskProfile.ANCHOR:
-        # Highest EV rider
-        return max(eligible_ids, key=lambda rid: sim_results[rid].expected_value)
+        # Rider with highest floor (p10)
+        return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_10)
 
     elif profile == RiskProfile.BALANCED:
-        # Best EV/std_dev ratio (Sharpe-like)
-        def sharpe(rid: str) -> float:
-            s = sim_results[rid]
-            if s.std_dev <= 0:
-                return s.expected_value
-            return s.expected_value / s.std_dev
-        return max(eligible_ids, key=sharpe)
+        # Rider with highest EV
+        return max(eligible_ids, key=lambda rid: sim_results[rid].expected_value)
 
     elif profile == RiskProfile.AGGRESSIVE:
-        # Highest p90
-        return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_90)
+        # Rider with highest ceiling (p95)
+        return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_95)
 
     else:  # ALL_IN
-        # Highest p95
+        # Rider with highest ceiling (p95)
         return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_95)
 
 

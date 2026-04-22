@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from scoring.engine import Rider, Stage, SprintPoint, KOMPoint
 from scoring.probabilities import (
-    RiderProb, generate_priors, interactive_adjust, save_probs, load_probs,
+    RiderProb, RiderRole, generate_priors, interactive_adjust, save_probs, load_probs,
+    _rider_type,
 )
 
 
@@ -228,13 +229,16 @@ class TestSprintKOM:
 class TestRiderTypeClassification:
     """A1: value-bracket classification gives differentiated priors."""
 
-    def test_gc_rider_higher_p_top15_on_mountain_than_flat(self):
-        """GC rider (value > 8M) gets higher p_top15 on mountain than flat."""
+    def test_gc_contender_higher_p_top15_on_mountain_than_flat(self):
+        """A GC contender (gc_position <= 20) gets higher p_top15 on mountain than flat."""
         gc_rider = make_rider(value=10_000_000)
+        # Give rider a GC position to force GC_CONTENDER classification
+        import dataclasses
+        gc_rider = dataclasses.replace(gc_rider, gc_position=5)
         rp_mountain = generate_priors([gc_rider], make_stage("mountain"))["r1"]
         rp_flat = generate_priors([gc_rider], make_stage("flat"))["r1"]
         assert rp_mountain.p_top15 > rp_flat.p_top15, (
-            f"GC rider mountain p_top15 ({rp_mountain.p_top15}) should exceed "
+            f"GC contender mountain p_top15 ({rp_mountain.p_top15}) should exceed "
             f"flat p_top15 ({rp_flat.p_top15})"
         )
 
@@ -390,3 +394,127 @@ class TestPersistence:
             assert "prob_history" in data
         finally:
             os.unlink(path)
+
+
+# ── Rider role classification tests (B1) ──────────────────────────────────────
+
+class TestRiderRoleClassification:
+    """_rider_type() correctly classifies riders by gc_position, value, and stage type."""
+
+    def test_rider_type_gc_by_position(self):
+        """gc_position <= 20 → GC_CONTENDER regardless of value."""
+        rider = make_rider(value=5_000_000)
+        import dataclasses
+        rider = dataclasses.replace(rider, gc_position=10)
+        stage = make_stage("flat")
+        assert _rider_type(rider, stage) == RiderRole.GC_CONTENDER
+
+    def test_rider_type_gc_by_high_value(self):
+        """value > 12M → GC_CONTENDER."""
+        rider = make_rider(value=14_000_000)
+        stage = make_stage("flat")
+        assert _rider_type(rider, stage) == RiderRole.GC_CONTENDER
+
+    def test_rider_type_sprinter_on_flat(self):
+        """8-12M rider with no gc_position on flat → SPRINTER."""
+        rider = make_rider(value=10_000_000)
+        stage = make_stage("flat")
+        assert _rider_type(rider, stage) == RiderRole.SPRINTER
+
+    def test_rider_type_climber_on_mountain(self):
+        """8-12M rider with no gc_position on mountain → CLIMBER."""
+        rider = make_rider(value=10_000_000)
+        stage = make_stage("mountain")
+        assert _rider_type(rider, stage) == RiderRole.CLIMBER
+
+    def test_rider_type_breakaway(self):
+        """5-8M rider on non-TT stage → BREAKAWAY_SPECIALIST."""
+        rider = make_rider(value=7_000_000)
+        stage = make_stage("hilly")
+        assert _rider_type(rider, stage) == RiderRole.BREAKAWAY
+
+    def test_rider_type_tt_specialist(self):
+        """5-8M rider on ITT → TT_SPECIALIST."""
+        rider = make_rider(value=7_000_000)
+        stage = make_stage("itt")
+        assert _rider_type(rider, stage) == RiderRole.TT
+
+    def test_rider_type_domestique(self):
+        """value < 5M → DOMESTIQUE."""
+        rider = make_rider(value=2_000_000)
+        stage = make_stage("mountain")
+        assert _rider_type(rider, stage) == RiderRole.DOMESTIQUE
+
+    def test_rider_type_gc_position_overrides_value(self):
+        """gc_position <= 20 takes priority even for low-value riders."""
+        rider = make_rider(value=3_000_000)
+        import dataclasses
+        rider = dataclasses.replace(rider, gc_position=15)
+        stage = make_stage("mountain")
+        assert _rider_type(rider, stage) == RiderRole.GC_CONTENDER
+
+
+# ── Role × stage_type prior matrix tests (B2) ────────────────────────────────
+
+class TestRoleStageMatrix:
+    """generate_priors() uses the role × stage_type matrix correctly."""
+
+    def test_priors_flat_stage_sprinter_higher_than_gc(self):
+        """On flat stage, SPRINTER (8-12M, no gc_pos) has higher p_top15 than GC_CONTENDER."""
+        sprinter = make_rider(holdet_id="sp", value=10_000_000)
+        import dataclasses
+        gc_rider = dataclasses.replace(make_rider(holdet_id="gc", value=10_000_000), gc_position=5)
+        flat = make_stage("flat")
+        probs = generate_priors([sprinter, gc_rider], flat)
+        assert probs["sp"].p_top15 > probs["gc"].p_top15, (
+            f"Flat: SPRINTER p_top15={probs['sp'].p_top15} should exceed "
+            f"GC_CONTENDER p_top15={probs['gc'].p_top15}"
+        )
+
+    def test_priors_mountain_stage_gc_higher_than_domestique(self):
+        """On mountain, GC_CONTENDER has much higher p_top15 than DOMESTIQUE."""
+        import dataclasses
+        gc_rider = dataclasses.replace(make_rider(holdet_id="gc", value=15_000_000), gc_position=3)
+        domestique = make_rider(holdet_id="dom", value=2_000_000)
+        mountain = make_stage("mountain")
+        probs = generate_priors([gc_rider, domestique], mountain)
+        assert probs["gc"].p_top15 > probs["dom"].p_top15, (
+            f"Mountain: GC_CONTENDER p_top15={probs['gc'].p_top15} should exceed "
+            f"DOMESTIQUE p_top15={probs['dom'].p_top15}"
+        )
+
+    def test_priors_itt_tt_specialist_highest(self):
+        """On ITT, TT_SPECIALIST has highest p_top15."""
+        import dataclasses
+        tt_rider = make_rider(holdet_id="tt", value=7_000_000)
+        gc_rider = dataclasses.replace(make_rider(holdet_id="gc", value=15_000_000), gc_position=1)
+        domestique = make_rider(holdet_id="dom", value=2_000_000)
+        itt = make_stage("itt")
+        probs = generate_priors([tt_rider, gc_rider, domestique], itt)
+        assert probs["tt"].p_top15 > probs["dom"].p_top15
+        # TT specialist (0.50) vs GC_CONTENDER (0.40) — TT specialist wins on ITT
+        assert probs["tt"].p_top15 >= probs["gc"].p_top15
+
+    def test_tiered_attention_domestique_low_on_all_stages(self):
+        """DOMESTIQUE (< 5M) gets p_top15 ≤ 0.02 regardless of stage type."""
+        rider = make_rider(value=2_500_000)
+        for stype in ("flat", "hilly", "mountain", "itt"):
+            rp = generate_priors([rider], make_stage(stype))["r1"]
+            assert rp.p_top15 <= 0.02, f"{stype}: domestique p_top15={rp.p_top15}"
+
+    def test_tiered_attention_top20_full_priors(self):
+        """Top 20 riders by value get full role matrix probability (not reduced)."""
+        # 20 riders, all value=10M. All should get full SPRINTER flat probability.
+        riders = [make_rider(holdet_id=f"r{i}", value=10_000_000) for i in range(1, 21)]
+        probs = generate_priors(riders, make_stage("flat"))
+        for r in riders:
+            assert probs[r.holdet_id].p_top15 == pytest.approx(0.45, abs=0.01)
+
+    def test_tiered_attention_rank21_reduced(self):
+        """Rider ranked 21st by value gets reduced probability (tier multiplier 0.6)."""
+        # 21 riders: 20 at 10M, 1 at 9M (rank 21)
+        riders = [make_rider(holdet_id=f"top{i}", value=10_000_000) for i in range(1, 21)]
+        riders.append(make_rider(holdet_id="r21", value=9_000_000))
+        probs = generate_priors(riders, make_stage("flat"))
+        # rank 21 SPRINTER flat: 0.45 × 0.6 = 0.27
+        assert probs["r21"].p_top15 == pytest.approx(0.45 * 0.6, abs=0.01)

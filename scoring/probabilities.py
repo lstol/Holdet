@@ -33,19 +33,26 @@ class RiderProb:
     manual_overrides: dict = field(default_factory=dict)  # field → value
 
 
-# ── Base probability tables ───────────────────────────────────────────────────
+# ── Rider role constants ──────────────────────────────────────────────────────
 
-BASE_TOP15: dict[str, dict[str, float]] = {
-    "flat":     {"sprinter": 0.35, "climber": 0.05, "gc": 0.08, "tt": 0.10,
-                 "specialist": 0.15, "domestique": 0.04, "all": 0.12},
-    "hilly":    {"sprinter": 0.10, "climber": 0.18, "gc": 0.15, "tt": 0.10,
-                 "specialist": 0.22, "domestique": 0.04, "all": 0.12},
-    "mountain": {"sprinter": 0.02, "climber": 0.25, "gc": 0.45, "tt": 0.12,
-                 "specialist": 0.12, "domestique": 0.03, "all": 0.08},
-    "itt":      {"sprinter": 0.08, "climber": 0.08, "gc": 0.20, "tt": 0.40,
-                 "specialist": 0.14, "domestique": 0.04, "all": 0.12},
-    "ttt":      {"sprinter": 0.50, "climber": 0.50, "gc": 0.50, "tt": 0.50,
-                 "specialist": 0.50, "domestique": 0.50, "all": 0.50},
+class RiderRole:
+    GC_CONTENDER = "gc_contender"
+    SPRINTER     = "sprinter"
+    CLIMBER      = "climber"
+    BREAKAWAY    = "breakaway"
+    TT           = "tt"
+    DOMESTIQUE   = "domestique"
+
+
+# ── Role × stage_type probability matrix (B2) ─────────────────────────────────
+
+ROLE_TOP15: dict[str, dict[str, float]] = {
+    RiderRole.GC_CONTENDER: {"flat": 0.15, "hilly": 0.20, "mountain": 0.35, "itt": 0.40, "ttt": 0.40},
+    RiderRole.SPRINTER:     {"flat": 0.45, "hilly": 0.25, "mountain": 0.05, "itt": 0.05, "ttt": 0.05},
+    RiderRole.CLIMBER:      {"flat": 0.10, "hilly": 0.20, "mountain": 0.40, "itt": 0.10, "ttt": 0.10},
+    RiderRole.BREAKAWAY:    {"flat": 0.15, "hilly": 0.20, "mountain": 0.15, "itt": 0.05, "ttt": 0.05},
+    RiderRole.TT:           {"flat": 0.10, "hilly": 0.10, "mountain": 0.08, "itt": 0.50, "ttt": 0.50},
+    RiderRole.DOMESTIQUE:   {"flat": 0.02, "hilly": 0.02, "mountain": 0.02, "itt": 0.02, "ttt": 0.02},
 }
 
 # Jersey retention probability by stage type
@@ -64,21 +71,31 @@ def _clamp(v: float) -> float:
 
 def _rider_type(rider: Rider, stage: Stage) -> str:
     """
-    Classify rider by value bracket and stage type.
+    Classify rider by GC position, value bracket, and stage type.
 
-    > 8M  → "gc" on mountain/hilly (GC contenders), "sprinter" on flat/itt
-    > 5M  → "specialist" (punchers, breakaway riders)
-    < 3M  → "domestique" (low-value support riders)
-    else  → "all"
+    Returns a RiderRole string constant.
     """
+    gc = rider.gc_position
     v = rider.value
+    stype = stage.stage_type
+
+    # GC position takes priority
+    if gc is not None and gc <= 20:
+        return RiderRole.GC_CONTENDER
+    if v > 12_000_000:
+        return RiderRole.GC_CONTENDER
     if v > 8_000_000:
-        return "gc" if stage.stage_type in ("mountain", "hilly") else "sprinter"
+        if stype == "flat":
+            return RiderRole.SPRINTER
+        elif stype in ("mountain", "hilly"):
+            return RiderRole.CLIMBER
+        else:  # itt, ttt
+            return RiderRole.GC_CONTENDER
     if v > 5_000_000:
-        return "specialist"
-    if v < 3_000_000:
-        return "domestique"
-    return "all"
+        if stype in ("itt", "ttt"):
+            return RiderRole.TT
+        return RiderRole.BREAKAWAY
+    return RiderRole.DOMESTIQUE
 
 
 # ── Core probability generation ───────────────────────────────────────────────
@@ -86,15 +103,29 @@ def _rider_type(rider: Rider, stage: Stage) -> str:
 def generate_priors(
     riders: list[Rider],
     stage: Stage,
+    odds_map: Optional[dict] = None,
 ) -> dict[str, RiderProb]:
     """
     Generate model probability estimates from stage type + rider data.
     Returns dict of holdet_id → RiderProb with source="model".
+
+    Parameters
+    ----------
+    odds_map : {rider_name_fragment: p_win} dict, or None.
+        When provided, apply_odds_to_probs() runs automatically before returning,
+        overriding model priors for matched riders.
     """
     stage_type = stage.stage_type
     has_sprint = bool(stage.sprint_points)
     has_kom = bool(stage.kom_points)
-    base_table = BASE_TOP15.get(stage_type, BASE_TOP15["flat"])
+
+    # B3: tiered attention — sort riders by value descending to assign tier
+    sorted_by_value = sorted(
+        range(len(riders)), key=lambda i: riders[i].value, reverse=True
+    )
+    value_rank: dict[str, int] = {}  # holdet_id → 1-based rank
+    for rank, i in enumerate(sorted_by_value, 1):
+        value_rank[riders[i].holdet_id] = rank
 
     result: dict[str, RiderProb] = {}
 
@@ -120,7 +151,20 @@ def generate_priors(
             continue
 
         rtype = _rider_type(rider, stage)
-        p_top15 = _clamp(base_table.get(rtype, base_table.get("all", 0.12)))
+        role_table = ROLE_TOP15.get(rtype, ROLE_TOP15[RiderRole.DOMESTIQUE])
+        base_p_top15 = role_table.get(stage_type, 0.02)
+
+        # B3: tiered attention multiplier
+        rank = value_rank.get(rid, 999)
+        if rank <= 20:
+            tier_mult = 1.0
+        elif rank <= 50:
+            tier_mult = 0.6
+        else:
+            base_p_top15 = 0.02
+            tier_mult = 1.0
+
+        p_top15 = _clamp(base_p_top15 * tier_mult)
 
         # Derive hierarchy using fixed ratios
         p_top10 = _clamp(p_top15 * 0.65)
@@ -136,16 +180,13 @@ def generate_priors(
         jersey_table = JERSEY_RETAIN.get(stage_type, JERSEY_RETAIN["flat"])
         p_jersey_retain = {j: jersey_table.get(j, 0.5) for j in rider.jerseys}
 
-        # Sprint / KOM expectations — zero unless stage has those points defined
+        # Sprint / KOM expectations
         exp_sprint = 0.0
         exp_kom = 0.0
-        if has_sprint:
-            # Crude: sprinters and flat riders get a non-zero expectation
-            if stage_type in ("flat", "hilly"):
-                exp_sprint = round(p_top15 * 3.0, 2)
-        if has_kom:
-            if stage_type in ("mountain", "hilly"):
-                exp_kom = round(p_top15 * 2.0, 2)
+        if has_sprint and stage_type in ("flat", "hilly"):
+            exp_sprint = round(p_top15 * 3.0, 2)
+        if has_kom and stage_type in ("mountain", "hilly"):
+            exp_kom = round(p_top15 * 2.0, 2)
 
         result[rid] = RiderProb(
             rider_id=rid,
@@ -161,6 +202,12 @@ def generate_priors(
             source="model",
             model_confidence=0.6,
         )
+
+    # B4: auto-apply odds when provided
+    if odds_map:
+        from scoring.odds import apply_odds_to_probs  # lazy import to avoid circular
+        riders_by_id = {r.holdet_id: r for r in riders}
+        result = apply_odds_to_probs(result, odds_map, riders_by_id)
 
     return result
 
@@ -214,7 +261,6 @@ def _display_table(probs: dict[str, RiderProb], stage: Stage,
         rider = riders_by_id.get(rid)
         name = rider.name if rider else rid
         team = rider.team_abbr if rider else "?"
-        # Truncate long names
         name_disp = name[:22]
         src = rp.source[:3]
         if rp.source == "adjusted":
@@ -260,7 +306,6 @@ def interactive_adjust(
         for r in riders:
             riders_by_id[r.holdet_id] = r
 
-    # Keep original priors for reset
     import copy
     original_probs = copy.deepcopy(probs)
     current_probs = copy.deepcopy(probs)
@@ -307,13 +352,10 @@ def interactive_adjust(
                 print(f"  Reset to model priors.")
             continue
 
-        # <fragment> <field> <value>
         if len(parts) < 3:
             print("  Usage: <rider fragment> <field> <value>  or  done")
             continue
 
-        # Rider fragment may be multiple words before the field keyword
-        # Try to parse: last two tokens are field+value, rest is rider fragment
         field_key = None
         value_str = None
         rider_frag = None

@@ -24,7 +24,7 @@ from scoring.engine import (
 )
 from scoring.probabilities import generate_priors, interactive_adjust, save_probs
 from scoring.odds import cli_odds_input
-from scoring.simulator import simulate_team
+from scoring.simulator import simulate_all_riders
 from scoring.optimizer import (
     optimize_all_profiles, suggest_profile, format_briefing_table,
 )
@@ -321,7 +321,7 @@ def cmd_brief(args) -> None:
 
     # 3. Simulate team only (fast preview)
     team_riders = [r for r in riders if r.holdet_id in my_team]
-    team_sims = simulate_team(
+    team_sims = simulate_all_riders(
         riders=team_riders,
         stage=stage,
         probs=probs,
@@ -331,7 +331,7 @@ def cmd_brief(args) -> None:
     )
 
     # 4. Simulate all riders for optimizer
-    all_sims = simulate_team(
+    all_sims = simulate_all_riders(
         riders=riders,
         stage=stage,
         probs=probs,

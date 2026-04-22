@@ -33,7 +33,7 @@ from scoring.engine import (
     Rider, Stage, StageResult, SprintPoint, KOMPoint, score_rider,
 )
 from scoring.probabilities import generate_priors, save_probs
-from scoring.simulator import simulate_team
+from scoring.simulator import simulate_all_riders
 from scoring.optimizer import optimize_all_profiles, suggest_profile
 from output.tracker import record_stage_accuracy, save_accuracy
 
@@ -335,7 +335,7 @@ def post_brief(req: BriefRequest) -> dict:
     probs = generate_priors(riders, stage)
 
     # Simulate full field for optimizer
-    all_sims = simulate_team(
+    all_sims = simulate_all_riders(
         riders=riders,
         stage=stage,
         probs=probs,
