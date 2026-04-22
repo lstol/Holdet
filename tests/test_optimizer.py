@@ -41,6 +41,9 @@ from scoring.optimizer import (
     _buy_fee,
     _count_teams,
     _eval_swap,
+    _eval_team,
+    _eval_cache,
+    NOISE_FLOOR,
 )
 from scoring.probabilities import RiderProb
 from scoring.simulator import SimResult, TeamSimResult
@@ -329,8 +332,8 @@ class TestEvalSwap:
         assert score is None
 
     def test_balanced_accepts_if_ev_gain_exceeds_threshold(self):
-        # ev_gain = 55k-40k = 15k, threshold = 50k/10 = 5k → accept
-        score = _eval_swap(RiskProfile.BALANCED, 15_000, 55_000, 40_000, 50_000, 10)
+        # ev_gain = 55k-40k = 15k > fee_threshold 5k, gain=50k > NOISE_FLOOR → accept
+        score = _eval_swap(RiskProfile.BALANCED, 50_000, 55_000, 40_000, 50_000, 10)
         assert score is not None and score > 0
 
     def test_balanced_rejects_if_ev_gain_below_threshold(self):
@@ -357,8 +360,9 @@ class TestEvalSwap:
         score = _eval_swap(RiskProfile.AGGRESSIVE, 90_000, 5_000, 40_000, 50_000, 10)
         assert score is not None and score > 0
 
-    def test_all_in_accepts_any_positive_gain(self):
-        score = _eval_swap(RiskProfile.ALL_IN, 1, 55_000, 40_000, 50_000, 10)
+    def test_all_in_accepts_gain_above_noise_floor(self):
+        # gain must exceed NOISE_FLOOR (20k) — small gains are simulation noise
+        score = _eval_swap(RiskProfile.ALL_IN, 25_000, 55_000, 40_000, 50_000, 10)
         assert score is not None and score > 0
 
     def test_all_in_rejects_zero_or_negative_gain(self):
@@ -1067,3 +1071,72 @@ class TestEmptyTeamFill:
             assert total_value <= 50_000_000, (
                 f"{profile.value}: squad value {total_value:,} exceeds 50M budget"
             )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Session 15-Fixes tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _make_flat_stage_fix():
+    return Stage(
+        number=1, race="giro_2026", stage_type="flat", distance_km=180.0,
+        is_ttt=False, start_location="A", finish_location="B",
+        sprint_points=[], kom_points=[], notes="",
+    )
+
+def _make_rider_fix(holdet_id, team_abbr="T1", value=8_000_000):
+    return Rider(
+        holdet_id=holdet_id, person_id=f"p_{holdet_id}", team_id=f"t_{team_abbr}",
+        name=f"Rider {holdet_id}", team="Team", team_abbr=team_abbr,
+        value=value, start_value=value, points=0, status="active",
+        gc_position=None, jerseys=[], in_my_team=False, is_captain=False,
+    )
+
+
+class TestEvalCacheKeySorted:
+    """_eval_team enforces sorted key — different call order hits same cache entry."""
+
+    def test_unsorted_and_sorted_ids_hit_same_cache(self):
+        import scoring.optimizer as opt_mod
+        opt_mod._eval_cache.clear()
+
+        riders = [_make_rider_fix(f"r{i}", f"T{i}") for i in range(1, 9)]
+        stage = _make_flat_stage_fix()
+        probs = {}
+
+        ids_abc = tuple(["r3", "r1", "r2", "r4", "r5", "r6", "r7", "r8"])
+        ids_sorted = tuple(sorted(ids_abc))
+        captain = "r1"
+
+        result_a = _eval_team(ids_abc,   captain, stage, riders, probs, n=5, seed=42)
+        result_b = _eval_team(ids_sorted, captain, stage, riders, probs, n=5, seed=42)
+
+        assert result_a is result_b  # same object from cache
+        assert len(opt_mod._eval_cache) == 1  # only one cache entry created
+
+
+class TestThresholdNoiseFloor:
+    """NOISE_FLOOR constant and scale-aware threshold logic."""
+
+    def test_noise_floor_constant_defined(self):
+        assert NOISE_FLOOR == 20_000
+
+    def test_threshold_uses_noise_floor_when_metric_is_zero(self):
+        # With current_metric=0, threshold must equal NOISE_FLOOR (not zero)
+        score = _eval_swap(RiskProfile.ALL_IN, 0, 0, 0, 0, 1, current_metric=0)
+        assert score is None  # gain=0 < NOISE_FLOOR=20k → rejected
+
+        score2 = _eval_swap(RiskProfile.ALL_IN, NOISE_FLOOR + 1, 0, 0, 0, 1, current_metric=0)
+        assert score2 is not None  # gain > NOISE_FLOOR → accepted
+
+    def test_threshold_scales_with_metric_above_noise_floor(self):
+        # current_metric=5_000_000 → 1% = 50_000 > NOISE_FLOOR → threshold = 50_000
+        score_below = _eval_swap(
+            RiskProfile.ALL_IN, 40_000, 0, 0, 0, 1, current_metric=5_000_000
+        )
+        assert score_below is None  # 40k < 50k threshold → rejected
+
+        score_above = _eval_swap(
+            RiskProfile.ALL_IN, 60_000, 0, 0, 0, 1, current_metric=5_000_000
+        )
+        assert score_above is not None  # 60k > 50k threshold → accepted

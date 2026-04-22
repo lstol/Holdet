@@ -625,3 +625,40 @@ class TestMultiRoleClassification:
         stage = _make_stage_b("flat")
         roles = _rider_roles(rider, stage)
         assert RiderRole.DOMESTIQUE in roles
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Session 15-Fixes: role precedence and no-duplicates
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestRolePrecedenceAndDuplicates:
+    """Probability signal overrides value bracket; no role appears twice."""
+
+    def test_role_prob_overrides_value_for_mid_value_flat_rider(self):
+        """Mid-value flat rider with p_win=0.08 → [sprinter], not [breakaway]."""
+        rider = _make_rider_b(value=6_000_000, gc_position=None)
+        stage = _make_stage_b("flat")
+        probs = {
+            "r1": RiderProb(
+                rider_id="r1", stage_number=1,
+                p_win=0.08, p_top3=0.20, p_top10=0.35, p_top15=0.45,
+                p_dnf=0.01,
+            )
+        }
+        roles = _rider_roles(rider, stage, probs=probs)
+        assert RiderRole.SPRINTER in roles
+        assert RiderRole.BREAKAWAY not in roles
+
+    def test_role_no_duplicates(self):
+        """No role string appears more than once in any output."""
+        import itertools
+        stage_types = ["flat", "mountain", "hilly", "itt", "ttt"]
+        value_brackets = [3_000_000, 6_000_000, 9_000_000, 13_000_000, 16_000_000]
+        gc_positions = [None, 5, 25]
+        for stype, value, gc_pos in itertools.product(stage_types, value_brackets, gc_positions):
+            rider = _make_rider_b(value=value, gc_position=gc_pos)
+            stage = _make_stage_b(stype)
+            roles = _rider_roles(rider, stage)
+            assert len(roles) == len(set(roles)), (
+                f"Duplicate role in {roles} for value={value}, stype={stype}, gc={gc_pos}"
+            )

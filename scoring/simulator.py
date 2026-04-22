@@ -46,6 +46,8 @@ class TeamSimResult:
     percentile_50: float
     percentile_80: float
     percentile_95: float
+    etapebonus_ev: float = 0.0   # mean etapebonus across simulations
+    etapebonus_p95: float = 0.0  # 95th percentile etapebonus
 
 
 # ── Stage scenario definitions (A1) ───────────────────────────────────────────
@@ -322,6 +324,7 @@ def simulate_team(
 
     team_riders = [rider_map[rid] for rid in team if rid in rider_map]
     totals = np.empty(n, dtype=float)
+    etabonuses = np.empty(n, dtype=float)
 
     assert captain in (r.holdet_id for r in team_riders) or not team_riders, \
         f"captain {captain!r} must be in declared squad"
@@ -346,6 +349,7 @@ def simulate_team(
 
         captain_bonus = max(0.0, sim_values.get(captain, 0.0))
         totals[sim_i] = sum(sim_values.values()) + captain_bonus + etabonus
+        etabonuses[sim_i] = etabonus
 
     return TeamSimResult(
         team_ids=list(team),
@@ -355,6 +359,8 @@ def simulate_team(
         percentile_50=float(np.percentile(totals, 50)),
         percentile_80=float(np.percentile(totals, 80)),
         percentile_95=float(np.percentile(totals, 95)),
+        etapebonus_ev=float(np.mean(etabonuses)),
+        etapebonus_p95=float(np.percentile(etabonuses, 95)),
     )
 
 

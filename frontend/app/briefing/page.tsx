@@ -109,6 +109,8 @@ type ProfileRec = {
   team_p10: number | null
   team_p80: number | null
   team_p95: number | null
+  etapebonus_ev: number | null
+  etapebonus_p95: number | null
 }
 
 type TeamSim = {
@@ -141,7 +143,7 @@ type BriefResult = {
   profiles: Record<string, ProfileRec>
   team_sims: TeamSim[]
   dns_alerts: { name: string; status: string }[]
-  scenario_stats: Record<string, number> | null
+  scenario_priors: Record<string, number> | null
 }
 
 function parseJsonField(val: unknown): string[] {
@@ -468,9 +470,9 @@ export default function BriefingPage() {
             <p className="text-zinc-500 text-xs italic">{briefResult.suggested_profile_reason}</p>
           )}
 
-          {briefResult.scenario_stats && Object.keys(briefResult.scenario_stats).length > 0 && (
+          {briefResult.scenario_priors && Object.keys(briefResult.scenario_priors).length > 0 && (
             <p className="text-zinc-500 text-xs">
-              {Object.entries(briefResult.scenario_stats)
+              {Object.entries(briefResult.scenario_priors)
                 .map(([s, p]) => `${s.charAt(0).toUpperCase() + s.slice(1).replace('_', ' ')} ${Math.round((p as number) * 100)}%`)
                 .join(' · ')}
             </p>
@@ -498,6 +500,7 @@ export default function BriefingPage() {
                     <th className="text-left py-1.5 pr-3">Profile</th>
                     <th className="text-right py-1.5 px-2">EV</th>
                     <th className="text-right py-1.5 px-2">Team EV</th>
+                    <th className="text-right py-1.5 px-2">Eta EV</th>
                     <th className="text-right py-1.5 px-2">Team p10</th>
                     <th className="text-right py-1.5 px-2">Team p80</th>
                     <th className="text-right py-1.5 px-2">Team p95</th>
@@ -518,6 +521,7 @@ export default function BriefingPage() {
                         </td>
                         <td className="py-2 px-2 text-right tabular-nums text-zinc-200">{fmtK(rec.expected_value)}</td>
                         <td className="py-2 px-2 text-right tabular-nums text-orange-400">{fmtK(rec.team_ev)}</td>
+                        <td className="py-2 px-2 text-right tabular-nums text-yellow-600">{fmtK(rec.etapebonus_ev)}</td>
                         <td className={`py-2 px-2 text-right tabular-nums ${(rec.team_p10 ?? 0) < 0 ? 'text-red-400' : 'text-green-400'}`}>
                           {fmtK(rec.team_p10)}
                         </td>

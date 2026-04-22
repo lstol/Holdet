@@ -1055,3 +1055,73 @@ class TestOptimizerTeamResultInRecommendation:
         )
         assert isinstance(rec.team_result, TeamSimResult)
         assert rec.team_result.captain_id in [r.holdet_id for r in riders]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Session 15-Fixes: etapebonus diagnostic tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _make_flat_stage_etabonus():
+    return Stage(
+        number=1, race="giro_2026", stage_type="flat", distance_km=180.0,
+        is_ttt=False, start_location="A", finish_location="B",
+        sprint_points=[], kom_points=[], notes="",
+    )
+
+
+class TestEtapebonusDiagnostics:
+    """TeamSimResult.etapebonus_ev and etapebonus_p95 fields."""
+
+    def test_etapebonus_ev_positive_for_capable_team(self):
+        """Team with 4+ riders likely to place top-15 → etapebonus_ev > 0."""
+        # Use riders with high p_top15 to reliably trigger etapebonus
+        riders = [
+            make_rider(
+                holdet_id=f"r{i}", team_abbr=f"T{i}",
+                value=10_000_000, gc_position=i,
+            )
+            for i in range(1, 9)
+        ]
+        stage = _make_flat_stage_etabonus()
+        # High p_top15 so they frequently land in top-15 and trigger etapebonus
+        probs = {
+            r.holdet_id: RiderProb(
+                rider_id=r.holdet_id, stage_number=1,
+                p_win=0.05, p_top3=0.15, p_top10=0.40, p_top15=0.65,
+                p_dnf=0.01,
+            )
+            for r in riders
+        }
+        from scoring.simulator import simulate_team
+        result = simulate_team(
+            team=[r.holdet_id for r in riders],
+            captain=riders[0].holdet_id,
+            stage=stage, riders=riders, probs=probs, n=200, seed=42,
+        )
+        assert result.etapebonus_ev > 0, \
+            f"Expected etapebonus_ev > 0 for capable team, got {result.etapebonus_ev}"
+
+    def test_etapebonus_p95_gte_etapebonus_ev(self):
+        """p95 of etapebonus is always >= mean etapebonus (by definition of percentile)."""
+        riders = [
+            make_rider(holdet_id=f"r{i}", team_abbr=f"T{i}", value=8_000_000)
+            for i in range(1, 9)
+        ]
+        stage = _make_flat_stage_etabonus()
+        probs = {
+            r.holdet_id: RiderProb(
+                rider_id=r.holdet_id, stage_number=1,
+                p_win=0.02, p_top3=0.10, p_top10=0.30, p_top15=0.50,
+                p_dnf=0.02,
+            )
+            for r in riders
+        }
+        from scoring.simulator import simulate_team
+        result = simulate_team(
+            team=[r.holdet_id for r in riders],
+            captain=riders[0].holdet_id,
+            stage=stage, riders=riders, probs=probs, n=200, seed=7,
+        )
+        assert result.etapebonus_p95 >= result.etapebonus_ev, (
+            f"etapebonus_p95={result.etapebonus_p95} < etapebonus_ev={result.etapebonus_ev}"
+        )

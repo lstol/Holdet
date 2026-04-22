@@ -151,10 +151,12 @@ def _serialize_profiles(profiles: dict, rider_map: dict[str, Rider]) -> dict:
                 td["rider_name"] = r.name if r else td["rider_id"]
             transfers.append(td)
         captain_name = rider_map.get(rec.captain, Rider.__new__(Rider)).name if rec.captain in rider_map else rec.captain
-        team_ev   = round(rec.team_result.expected_value) if rec.team_result else None
-        team_p10  = round(rec.team_result.percentile_10)  if rec.team_result else None
-        team_p80  = round(rec.team_result.percentile_80)  if rec.team_result else None
-        team_p95  = round(rec.team_result.percentile_95)  if rec.team_result else None
+        team_ev          = round(rec.team_result.expected_value)    if rec.team_result else None
+        team_p10         = round(rec.team_result.percentile_10)     if rec.team_result else None
+        team_p80         = round(rec.team_result.percentile_80)     if rec.team_result else None
+        team_p95         = round(rec.team_result.percentile_95)     if rec.team_result else None
+        etapebonus_ev    = round(rec.team_result.etapebonus_ev)     if rec.team_result else None
+        etapebonus_p95   = round(rec.team_result.etapebonus_p95)    if rec.team_result else None
         out[key] = {
             "transfers": transfers,
             "captain": rec.captain,
@@ -168,6 +170,8 @@ def _serialize_profiles(profiles: dict, rider_map: dict[str, Rider]) -> dict:
             "team_p10": team_p10,
             "team_p80": team_p80,
             "team_p95": team_p95,
+            "etapebonus_ev": etapebonus_ev,
+            "etapebonus_p95": etapebonus_p95,
         }
     return out
 
@@ -434,7 +438,7 @@ def post_brief(req: BriefRequest) -> dict:
         "profiles": _serialize_profiles(recommendations, rider_map),
         "team_sims": team_sims,
         "dns_alerts": dns_alerts,
-        "scenario_stats": scenario_stats,
+        "scenario_priors": scenario_stats,
     }
     if not my_team:
         resp["team_note"] = "No team picked yet — showing best team to select from scratch."

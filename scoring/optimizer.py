@@ -60,6 +60,11 @@ class ProfileRecommendation:
 
 _eval_cache: dict = {}
 
+# Noise floor for improvement thresholds (≈ one position improvement at n=500).
+# Prevents accepting random simulation noise as a meaningful gain.
+# Tune after Giro validation data is available.
+NOISE_FLOOR = 20_000
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -97,7 +102,7 @@ def _eval_team(
     seed: int = 42,
 ) -> TeamSimResult:
     """Evaluate a squad via team Monte Carlo simulation, with memoization."""
-    key = (squad_ids, captain_id)
+    key = (tuple(sorted(squad_ids)), captain_id)  # sort enforced here — caller order doesn't matter
     if key not in _eval_cache:
         _eval_cache[key] = simulate_team(
             team=list(squad_ids),
@@ -180,7 +185,7 @@ def _try_double_swaps(
     Random double-swap exploration after greedy convergence (A5).
     Returns (proposed_squad, new_captain) if 1%+ improvement found, else None.
     """
-    threshold = 0.01 * abs(current_metric)
+    threshold = max(0.01 * abs(current_metric), NOISE_FLOOR)
     eligible_outside = [c for c in candidates if c not in active_squad]
     if len(eligible_outside) < 2 or len(active_squad) < 2:
         return None
@@ -233,6 +238,7 @@ def _eval_swap(
     sell_ev: float,
     fee: int,
     stages_remaining: int,
+    current_metric: float = 0.0,
 ) -> Optional[float]:
     """
     Evaluate whether a swap is acceptable under the profile's transfer logic.
@@ -242,23 +248,28 @@ def _eval_swap(
       buy_ev  = proposed team expected_value
       sell_ev = current team expected_value
       gain    = _team_metric(proposed) - _team_metric(current)
+
+    Uses max(1% of current_metric, NOISE_FLOOR) as minimum meaningful gain
+    to avoid accepting simulation noise as improvements.
     """
+    noise_threshold = max(0.01 * abs(current_metric), NOISE_FLOOR)
+
     if profile == RiskProfile.ANCHOR:
         fee_per_stage = fee / max(stages_remaining, 1)
         effective_gain = gain - fee_per_stage
-        if effective_gain <= 0:
+        if effective_gain < noise_threshold:
             return None
         return effective_gain
 
     elif profile == RiskProfile.BALANCED:
         ev_gain = buy_ev - sell_ev
-        threshold = fee / max(stages_remaining, 1)
-        if ev_gain <= threshold:
+        fee_threshold = fee / max(stages_remaining, 1)
+        if ev_gain <= fee_threshold or gain < noise_threshold:
             return None
         return gain
 
     elif profile == RiskProfile.AGGRESSIVE:
-        if gain <= 0:
+        if gain < noise_threshold:
             return None
         ev_change = buy_ev - sell_ev
         if ev_change < -30_000 and gain < 80_000:
@@ -266,7 +277,7 @@ def _eval_swap(
         return gain
 
     else:  # ALL_IN
-        if gain <= 0:
+        if gain < noise_threshold:
             return None
         return gain
 
@@ -520,6 +531,7 @@ def optimize(
                     sell_ev=current_result.expected_value,
                     fee=fee,
                     stages_remaining=stages_remaining,
+                    current_metric=current_metric,
                 )
                 if score is None or score <= best_score:
                     continue
