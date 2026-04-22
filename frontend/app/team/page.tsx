@@ -258,10 +258,10 @@ export default function TeamPage() {
                   </span>
                 )}
               </div>
-              {r.jerseys?.length > 0 && (
+              {parseJsonField(r.jerseys).length > 0 && (
                 <div className="flex gap-1 mt-2">
-                  {r.jerseys.map((j: string) => (
-                    <span key={j} className="text-xs px-1.5 py-0.5 bg-zinc-700 rounded">{j}</span>
+                  {parseJsonField(r.jerseys).map((j) => (
+                    <span key={String(j)} className="text-xs px-1.5 py-0.5 bg-zinc-700 rounded">{String(j)}</span>
                   ))}
                 </div>
               )}

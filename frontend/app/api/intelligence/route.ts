@@ -44,7 +44,9 @@ Return ONLY a JSON object with no preamble, no markdown, no code blocks:
   "stage_notes": "anything tactically important not captured per-rider",
   "sources_used": ["url1", "url2"]
 }
-Only include riders in rider_adjustments if you found specific information about them. Do not invent adjustments.`
+Only include riders in rider_adjustments if you found specific information about them. Do not invent adjustments.
+
+IMPORTANT: Output ONLY the raw JSON object. No prose before or after. No markdown code fences. Start your response with { and end with }.`
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -75,8 +77,11 @@ Only include riders in rider_adjustments if you found specific information about
     )
     const raw = textBlock?.text ?? ''
 
-    // Strip any accidental markdown code fences
-    const clean = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim()
+    // Extract JSON — handle code fences or bare JSON
+    const jsonMatch = raw.match(/```json?\s*([\s\S]*?)```/) || raw.match(/```([\s\S]*?)```/)
+    const clean = jsonMatch
+      ? jsonMatch[1].trim()
+      : raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim()
 
     let parsed
     try {

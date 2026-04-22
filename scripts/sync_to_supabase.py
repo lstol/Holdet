@@ -121,7 +121,7 @@ def sync_riders(client, race: str, user_id: str) -> int:
             "points":     r.get("points", 0),
             "status":     r.get("status", "active"),
             "gc_position": r.get("gc_position"),
-            "jerseys":    json.dumps(r.get("jerseys", [])),
+            "jerseys":    r.get("jerseys", []),
             "in_my_team": r.get("in_my_team", False),
             "is_captain": r.get("is_captain", False),
         })
