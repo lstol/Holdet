@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-24
 **Tests:** 458/458 passing (was 429 at start, +29 new tests)
-**Branch:** main
+**Branch:** claude/heuristic-cartwright-4cacf0 → merged to main
 
 ---
 
@@ -155,7 +155,7 @@ next_stage_type: Optional[str] = None   # reserved for Session 20
 
 ## Test breakdown (+29 new)
 
-**`tests/test_stage_intent.py` (19 new tests):**
+**`tests/test_stage_intent.py` (24 new tests):**
 
 `TestComputeStageIntent` (11 tests):
 - flat stage high win_priority
@@ -187,7 +187,7 @@ next_stage_type: Optional[str] = None   # reserved for Session 20
 - compute_transfer_penalty: pressure=0.0 → fee unchanged
 - λ=0 regression guard: next_ev has zero contribution
 
-**`tests/test_optimizer.py` (+10 new tests):**
+**`tests/test_optimizer.py` (+5 new tests):**
 
 `TestOptimizeAcceptsIntent` (3 tests):
 - optimize() with intent=None: no error
