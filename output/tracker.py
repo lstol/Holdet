@@ -8,6 +8,8 @@ Public API:
 """
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, asdict
 from typing import Optional
 
@@ -167,6 +169,58 @@ def format_brier_summary(accuracy_records: list[ProbAccuracy]) -> str:
 
 
 # ── save_accuracy ─────────────────────────────────────────────────────────────
+
+def compute_stage_brier(accuracy_records: list[ProbAccuracy]) -> dict:
+    """
+    Compute average Brier scores for p_win and p_top15 from a stage's accuracy records.
+
+    Returns a dict with keys: brier_p_win, brier_p_top15, n_riders_scored.
+    """
+    win_scores = [r.model_brier for r in accuracy_records if r.event == "win"]
+    top15_scores = [r.model_brier for r in accuracy_records if r.event == "top15"]
+    return {
+        "brier_p_win": sum(win_scores) / len(win_scores) if win_scores else float("nan"),
+        "brier_p_top15": sum(top15_scores) / len(top15_scores) if top15_scores else float("nan"),
+        "n_riders_scored": len(win_scores),
+    }
+
+
+def save_calibration_history(
+    stage: int,
+    date: str,
+    stage_type: str,
+    inferred_scenario: str,
+    brier_p_win: float,
+    brier_p_top15: float,
+    n_riders_scored: int,
+    notes: str = "",
+    path: str = "data/calibration_history.json",
+) -> None:
+    """Append one stage calibration entry to calibration_history.json."""
+    entry = {
+        "stage": stage,
+        "date": date,
+        "stage_type": stage_type,
+        "inferred_scenario": inferred_scenario,
+        "brier_p_win": round(brier_p_win, 6),
+        "brier_p_top15": round(brier_p_top15, 6),
+        "n_riders_scored": n_riders_scored,
+        "notes": notes,
+    }
+    history: list = []
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                history = json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            pass
+    history.append(entry)
+    tmp = path + ".tmp"
+    os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(history, fh, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+
 
 def save_accuracy(records: list[ProbAccuracy], state: dict) -> dict:
     """

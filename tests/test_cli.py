@@ -519,5 +519,153 @@ class TestLoadStage(unittest.TestCase):
             self.assertEqual(stage.stage_type, "mountain")
 
 
+# ── TestRolesCommand ──────────────────────────────────────────────────────────
+
+class TestRolesCommand(unittest.TestCase):
+    """Tests for `python3 main.py roles --stage N`."""
+
+    def _make_rider(self, holdet_id="1001", name="Test Rider", value=5_000_000,
+                    gc_position=None):
+        from scoring.engine import Rider
+        return Rider(
+            holdet_id=holdet_id,
+            person_id="201",
+            team_id="101",
+            name=name,
+            team="Team A",
+            team_abbr="TA",
+            value=value,
+            start_value=value,
+            points=0,
+            status="active",
+            gc_position=gc_position,
+            jerseys=[],
+            in_my_team=False,
+            is_captain=False,
+        )
+
+    def _write_files(self, tmp_dir, riders, stage_type="flat", stage_number=1,
+                     captain=None):
+        """Write riders.json, stages.json, and state.json to tmp_dir."""
+        from dataclasses import asdict
+        riders_path = os.path.join(tmp_dir, "riders.json")
+        stages_path = os.path.join(tmp_dir, "stages.json")
+        state_path = os.path.join(tmp_dir, "state.json")
+
+        with open(riders_path, "w") as f:
+            json.dump({r.holdet_id: asdict(r) for r in riders}, f)
+
+        stages = [{
+            "number": stage_number,
+            "race": "giro_2026",
+            "stage_type": stage_type,
+            "distance_km": 180.0,
+            "is_ttt": False,
+            "start_location": "Start",
+            "finish_location": "Finish",
+            "sprint_points": [],
+            "kom_points": [],
+            "notes": "",
+        }]
+        with open(stages_path, "w") as f:
+            json.dump(stages, f)
+
+        state = {
+            "current_stage": stage_number,
+            "bank": 50_000_000,
+            "rank": None,
+            "total_participants": None,
+            "my_team": [r.holdet_id for r in riders],
+            "captain": captain or (riders[0].holdet_id if riders else None),
+            "stages_completed": [],
+            "probs_by_stage": {},
+        }
+        with open(state_path, "w") as f:
+            json.dump(state, f)
+
+        return riders_path, stages_path, state_path
+
+    def test_roles_command_runs_without_error(self):
+        """roles command completes without raising an exception."""
+        import argparse
+        from main import cmd_roles
+
+        riders = [self._make_rider("1001", "Alpha Rider", value=10_000_000)]
+        with tempfile.TemporaryDirectory() as tmp:
+            rp, sp, stp = self._write_files(tmp, riders)
+            args = argparse.Namespace(stage=1)
+            with patch.dict(os.environ, {
+                "RIDERS_PATH": rp, "STAGES_PATH": sp, "STATE_PATH": stp,
+            }):
+                cmd_roles(args)   # must not raise
+
+    def test_roles_command_output_includes_rider_names(self):
+        """Each rider in riders.json appears in the roles output."""
+        import argparse
+        from main import cmd_roles
+
+        riders = [
+            self._make_rider("1001", "Alpha Rider", value=10_000_000),
+            self._make_rider("1002", "Beta Rider", value=8_000_000),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            rp, sp, stp = self._write_files(tmp, riders)
+            args = argparse.Namespace(stage=1)
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with patch.dict(os.environ, {
+                "RIDERS_PATH": rp, "STAGES_PATH": sp, "STATE_PATH": stp,
+            }), redirect_stdout(buf):
+                cmd_roles(args)
+            out = buf.getvalue()
+        assert "Alpha" in out
+        assert "Beta" in out
+
+    def test_roles_command_mountain_stage_shows_gc_climber(self):
+        """A high-value GC rider gets gc_contender or climber role on a mountain stage."""
+        import argparse
+        from main import cmd_roles
+
+        # Value > 12M → gc_contender; mountain stage → climber also likely
+        riders = [self._make_rider("9001", "GC Star", value=15_000_000, gc_position=3)]
+        with tempfile.TemporaryDirectory() as tmp:
+            rp, sp, stp = self._write_files(tmp, riders, stage_type="mountain")
+            args = argparse.Namespace(stage=1)
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with patch.dict(os.environ, {
+                "RIDERS_PATH": rp, "STAGES_PATH": sp, "STATE_PATH": stp,
+            }), redirect_stdout(buf):
+                cmd_roles(args)
+            out = buf.getvalue()
+        # gc_contender or climber must appear in output for a mountain stage + high-value rider
+        assert "gc_contender" in out or "climber" in out
+
+    def test_roles_command_shows_scenario_multiplier(self):
+        """Output contains a multiplier value (a float) for each rider."""
+        import argparse
+        import re
+        from main import cmd_roles
+
+        riders = [self._make_rider("1001", "Alpha Rider", value=10_000_000)]
+        with tempfile.TemporaryDirectory() as tmp:
+            rp, sp, stp = self._write_files(tmp, riders)
+            args = argparse.Namespace(stage=1)
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with patch.dict(os.environ, {
+                "RIDERS_PATH": rp, "STAGES_PATH": sp, "STATE_PATH": stp,
+            }), redirect_stdout(buf):
+                cmd_roles(args)
+            out = buf.getvalue()
+        # A float multiplier like "0.40" or "3.50" must appear in rider rows
+        assert re.search(r"\d+\.\d{2}\s+\(", out), (
+            "Expected a multiplier float followed by scenario name in parentheses"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

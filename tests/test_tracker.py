@@ -233,5 +233,101 @@ class TestSaveAccuracy(unittest.TestCase):
         self.assertEqual(len(updated["brier_history"]), 1)
 
 
+# ── Tests: compute_stage_brier ────────────────────────────────────────────────
+
+class TestComputeStageBrier(unittest.TestCase):
+
+    def _make_accuracy(self, event, model_prob, actual):
+        from output.tracker import ProbAccuracy
+        return ProbAccuracy(
+            stage=1,
+            rider_id="r1",
+            event=event,
+            model_prob=model_prob,
+            manual_prob=None,
+            actual=actual,
+            model_brier=(model_prob - actual) ** 2,
+            manual_brier=None,
+        )
+
+    def test_brier_score_perfect_predictor_is_zero(self):
+        """p_win=1.0 for the actual winner → Brier = 0."""
+        from output.tracker import compute_stage_brier
+        recs = [self._make_accuracy("win", 1.0, 1.0)]
+        result = compute_stage_brier(recs)
+        self.assertAlmostEqual(result["brier_p_win"], 0.0, places=10)
+
+    def test_brier_score_uniform_predictor_matches_naive_baseline(self):
+        """
+        Uniform p_win = 1/n for n riders: Brier = (1/n)^2 * (n-1) + (1 - 1/n)^2 * 1.
+        For 8 riders: Brier = 7*(1/8)^2 + (7/8)^2 = 0.10937... + 0.76562... / 8 ≈ 0.109375 + 0.765625 = not 0.25.
+        Simpler check: uniform p = 1/n for one winner → model_brier = (1-1/n)^2, for losers (1/n)^2.
+        Average over n = (1/n)*(1-1/n)^2 + (n-1)/n*(1/n)^2 = (1-1/n)/n + (n-1)/n^2 ... = (n-1)/n^2.
+        This equals 1/n - 1/n^2 which is NOT 0.25.
+        We simply test that the function returns the correct mean.
+        """
+        from output.tracker import compute_stage_brier
+        n = 8
+        p = 1.0 / n
+        # 1 winner, 7 non-winners, all with p_win = 1/n
+        recs = [self._make_accuracy("win", p, 1.0)] + \
+               [self._make_accuracy("win", p, 0.0) for _ in range(n - 1)]
+        result = compute_stage_brier(recs)
+        expected = ((p - 1.0) ** 2 + (n - 1) * p ** 2) / n
+        self.assertAlmostEqual(result["brier_p_win"], expected, places=8)
+        self.assertEqual(result["n_riders_scored"], n)
+
+    def test_brier_stage1_writes_calibration_history(self):
+        """save_calibration_history creates calibration_history.json with one entry."""
+        import json
+        import tempfile
+        import os
+        from output.tracker import save_calibration_history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "calibration_history.json")
+            save_calibration_history(
+                stage=1,
+                date="2026-05-09",
+                stage_type="flat",
+                inferred_scenario="bunch_sprint",
+                brier_p_win=0.043,
+                brier_p_top15=0.118,
+                n_riders_scored=8,
+                notes="first baseline — small sample",
+                path=path,
+            )
+            assert os.path.exists(path), "calibration_history.json was not created"
+            with open(path) as f:
+                history = json.load(f)
+            assert len(history) == 1, "Expected exactly 1 entry"
+
+    def test_calibration_history_has_required_fields(self):
+        """Entry in calibration_history.json contains all required fields."""
+        import json
+        import tempfile
+        import os
+        from output.tracker import save_calibration_history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "calibration_history.json")
+            save_calibration_history(
+                stage=1,
+                date="2026-05-09",
+                stage_type="flat",
+                inferred_scenario="bunch_sprint",
+                brier_p_win=0.043,
+                brier_p_top15=0.118,
+                n_riders_scored=8,
+                path=path,
+            )
+            with open(path) as f:
+                entry = json.load(f)[0]
+            required = {"stage", "date", "stage_type", "inferred_scenario",
+                        "brier_p_win", "brier_p_top15", "n_riders_scored"}
+            for field in required:
+                assert field in entry, f"Missing field: {field}"
+
+
 if __name__ == "__main__":
     unittest.main()

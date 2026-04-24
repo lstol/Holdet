@@ -31,6 +31,7 @@ from scoring.optimizer import (
 from output.report import BriefingOutput, format_briefing, format_status
 from output.tracker import (
     record_stage_accuracy, format_brier_summary, save_accuracy,
+    compute_stage_brier, save_calibration_history,
 )
 
 
@@ -663,6 +664,21 @@ def cmd_settle(args) -> None:
         accuracy_records = record_stage_accuracy(args.stage, stage_probs, result, state)
         state = save_accuracy(accuracy_records, state)
         print("\n" + format_brier_summary(accuracy_records))
+
+        # Calibration history — append per-stage Brier summary to data/calibration_history.json
+        brier = compute_stage_brier(accuracy_records)
+        save_calibration_history(
+            stage=args.stage,
+            date=datetime.now().strftime("%Y-%m-%d"),
+            stage_type=stage.stage_type,
+            inferred_scenario="",          # filled in manually in validation_log.md
+            brier_p_win=brier["brier_p_win"],
+            brier_p_top15=brier["brier_p_top15"],
+            n_riders_scored=brier["n_riders_scored"],
+            notes="",
+        )
+        print(f"  Calibration history saved (brier_p_win={brier['brier_p_win']:.4f}, "
+              f"brier_p_top15={brier['brier_p_top15']:.4f}, n={brier['n_riders_scored']})")
     else:
         print("\n  (No saved probs for this stage — skipping Brier tracking)")
 
@@ -824,6 +840,62 @@ def cmd_validate(args) -> None:
         print("All riders match. ✓")
 
 
+def cmd_roles(args) -> None:
+    """
+    Show how the simulator classifies each rider for a given stage.
+
+    Output: name, roles, p_top15, value, scenario multiplier under dominant scenario.
+    Sorted by value desc, then p_top15 desc. Read-only — no state writes.
+    """
+    from scoring.probabilities import _rider_roles, generate_priors
+    from scoring.simulator import STAGE_SCENARIOS, SCENARIO_MULTIPLIERS
+
+    riders_path = config.get_riders_path()
+    stages_path = config.get_stages_path()
+    state_path = config.get_state_path()
+
+    riders = load_riders(riders_path)
+    stage = _load_stage(stages_path, args.stage)
+    state = _load_state(state_path)
+    captain = state.get("captain")
+
+    probs = generate_priors(riders, stage)
+
+    # Dominant scenario = highest-prior scenario for this stage type
+    stage_scenarios = dict(STAGE_SCENARIOS.get(stage.stage_type, [("gc_day", 1.0)]))
+    dominant_scenario = max(stage_scenarios, key=stage_scenarios.get)
+    mult_table = SCENARIO_MULTIPLIERS.get(dominant_scenario, {})
+
+    rows = []
+    for rider in riders:
+        roles = _rider_roles(rider, stage, probs)
+        rp = probs.get(rider.holdet_id)
+        p_top15 = rp.p_top15 if rp is not None else 0.02
+        mult = max((mult_table.get(role, 1.0) for role in roles), default=1.0)
+        rows.append((rider, roles, p_top15, mult))
+
+    rows.sort(key=lambda x: (-x[0].value, -x[2]))
+
+    line = "─" * 80
+    print(f"\nStage {args.stage} ({stage.stage_type}) — Rider Role Classification")
+    print(line)
+    print(f"{'Rider':<22} {'Roles':<22} {'p_top15':>8} {'Value':>12}  Scenario mult")
+    print(line)
+
+    for rider, roles, p_top15, mult in rows:
+        extras = ""
+        if rider.gc_position is not None:
+            extras += f" GC#{rider.gc_position}"
+        if rider.holdet_id == captain:
+            extras += " [C]"
+        name_col = (rider.name + extras)[:22]
+        roles_str = ", ".join(roles)[:22]
+        print(
+            f"{name_col:<22} {roles_str:<22} {p_top15:>8.2f} {rider.value:>12,}  "
+            f"{mult:.2f} ({dominant_scenario})"
+        )
+
+
 def cmd_status(args) -> None:
     """Show current team, bank, rank, and DNS alerts."""
     riders_path = config.get_riders_path()
@@ -863,6 +935,10 @@ def main() -> None:
     p_validate = sub.add_parser("validate", help="Compare engine deltas vs Holdet API for a settled stage")
     p_validate.add_argument("--stage", type=int, required=True, help="Stage number to validate")
 
+    # roles
+    p_roles = sub.add_parser("roles", help="Show rider role classification and scenario multipliers")
+    p_roles.add_argument("--stage", type=int, required=True, help="Stage number to classify for")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -875,6 +951,8 @@ def main() -> None:
         cmd_status(args)
     elif args.command == "validate":
         cmd_validate(args)
+    elif args.command == "roles":
+        cmd_roles(args)
 
 
 if __name__ == "__main__":

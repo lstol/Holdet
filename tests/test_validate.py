@@ -366,3 +366,103 @@ class TestValidateCommand:
         assert "Zeta Rider" in captured.out, (
             "Rider name should appear in mismatch summary output"
         )
+
+    def test_validation_log_written_after_validate(self, tmp_path, monkeypatch):
+        """validate writes to validation_log.md when a mismatch is found."""
+        from main import cmd_validate
+
+        rider = _make_rider("1001", "Log Rider", value=5_000_000)
+        rh = _make_result_history(1, finish_order=["1001"])
+        vs = {"stage_1": {"1001": 1_000}}   # force large mismatch
+        state_path = _write_state(
+            tmp_path,
+            result_history={"stage_1": rh},
+            value_snapshot=vs,
+            my_team=["1001"],
+            captain="1001",
+        )
+        stages_path = _write_stages(tmp_path)
+        riders_path = _write_riders(tmp_path, [rider])
+        log_path = tmp_path / "validation_log.md"
+
+        monkeypatch.setenv("STATE_PATH", str(state_path))
+        monkeypatch.setenv("STAGES_PATH", str(stages_path))
+        monkeypatch.setenv("RIDERS_PATH", str(riders_path))
+        monkeypatch.setenv("VALIDATION_LOG_PATH", str(log_path))
+
+        with patch("main.fetch_riders", return_value=[rider]), \
+             patch("main.get_session", return_value=MagicMock()):
+            cmd_validate(_args(stage=1))
+
+        assert log_path.exists(), "validation_log.md must be written after a mismatch"
+
+    def test_validation_tolerates_small_diff(self, tmp_path, monkeypatch, capsys):
+        """Diff within ±5000 does not cause a failure exit — command completes normally."""
+        from main import cmd_validate
+
+        # rider.value = 5_000_000, snapshot = 4_998_000 → actual_delta = 2000
+        # engine_delta for a position-1 win on a flat stage will differ; but actual_delta=2000
+        # means any engine delta within ±1000 of 2000 is fine. We test that no exception
+        # is raised and the summary line is printed — tolerance enforcement is internal.
+        rider = _make_rider("1001", "Tolerant Rider", value=5_002_000)
+        rh = _make_result_history(1, finish_order=["1001"])
+        vs = {"stage_1": {"1001": 5_000_000}}   # small delta: 2000
+        state_path = _write_state(
+            tmp_path,
+            result_history={"stage_1": rh},
+            value_snapshot=vs,
+            my_team=["1001"],
+            captain="1001",
+        )
+        stages_path = _write_stages(tmp_path)
+        riders_path = _write_riders(tmp_path, [rider])
+        log_path = tmp_path / "validation_log.md"
+
+        monkeypatch.setenv("STATE_PATH", str(state_path))
+        monkeypatch.setenv("STAGES_PATH", str(stages_path))
+        monkeypatch.setenv("RIDERS_PATH", str(riders_path))
+        monkeypatch.setenv("VALIDATION_LOG_PATH", str(log_path))
+
+        with patch("main.fetch_riders", return_value=[rider]), \
+             patch("main.get_session", return_value=MagicMock()):
+            cmd_validate(_args(stage=1))   # must not raise
+
+        captured = capsys.readouterr()
+        assert "Engine matched" in captured.out
+
+    def test_validation_flags_systemic_bias(self, tmp_path, monkeypatch, capsys):
+        """When 3+ riders all show mismatches, all names appear in output."""
+        from main import cmd_validate
+
+        riders = [
+            _make_rider(str(i), f"Rider {i}", value=5_000_000)
+            for i in range(1, 4)
+        ]
+        rids = [str(i) for i in range(1, 4)]
+        rh = _make_result_history(1, finish_order=rids, holdet_ids=rids)
+        # Force large mismatch for all 3: snapshot ~ 0, current = 5M
+        vs = {"stage_1": {rid: 1_000 for rid in rids}}
+        state_path = _write_state(
+            tmp_path,
+            result_history={"stage_1": rh},
+            value_snapshot=vs,
+            my_team=rids,
+            captain=rids[0],
+        )
+        stages_path = _write_stages(tmp_path)
+        riders_path = _write_riders(tmp_path, riders)
+        log_path = tmp_path / "validation_log.md"
+
+        monkeypatch.setenv("STATE_PATH", str(state_path))
+        monkeypatch.setenv("STAGES_PATH", str(stages_path))
+        monkeypatch.setenv("RIDERS_PATH", str(riders_path))
+        monkeypatch.setenv("VALIDATION_LOG_PATH", str(log_path))
+
+        with patch("main.fetch_riders", return_value=riders), \
+             patch("main.get_session", return_value=MagicMock()):
+            cmd_validate(_args(stage=1))
+
+        captured = capsys.readouterr()
+        # All three mismatching riders must appear in output
+        for i in range(1, 4):
+            assert f"Rider {i}" in captured.out
