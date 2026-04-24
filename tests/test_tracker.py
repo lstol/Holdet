@@ -328,6 +328,70 @@ class TestComputeStageBrier(unittest.TestCase):
             for field in required:
                 assert field in entry, f"Missing field: {field}"
 
+    def test_save_calibration_history_includes_recorded_at(self):
+        """Entry must have a 'recorded_at' key with an ISO timestamp string."""
+        import json, tempfile, os
+        from output.tracker import save_calibration_history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "calibration_history.json")
+            save_calibration_history(
+                stage=1, date="2026-05-09", stage_type="flat",
+                inferred_scenario="bunch_sprint",
+                brier_p_win=0.04, brier_p_top15=0.12, n_riders_scored=8,
+                path=path,
+            )
+            entry = json.load(open(path))[0]
+        assert "recorded_at" in entry, "Missing 'recorded_at' field"
+        assert "T" in entry["recorded_at"], "recorded_at should be an ISO timestamp"
+
+    def test_save_calibration_history_includes_scope(self):
+        """Entry must have scope='team_only'."""
+        import json, tempfile, os
+        from output.tracker import save_calibration_history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "calibration_history.json")
+            save_calibration_history(
+                stage=1, date="2026-05-09", stage_type="flat",
+                inferred_scenario="gc_day",
+                brier_p_win=0.04, brier_p_top15=0.12, n_riders_scored=8,
+                path=path,
+            )
+            entry = json.load(open(path))[0]
+        assert entry.get("scope") == "team_only"
+
+    def test_save_calibration_history_rejects_invalid_scenario(self):
+        """inferred_scenario='bunch sprint' (with space) must raise ValueError."""
+        import tempfile, os
+        from output.tracker import save_calibration_history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "calibration_history.json")
+            with self.assertRaises(ValueError):
+                save_calibration_history(
+                    stage=1, date="2026-05-09", stage_type="flat",
+                    inferred_scenario="bunch sprint",   # space instead of underscore
+                    brier_p_win=0.04, brier_p_top15=0.12, n_riders_scored=8,
+                    path=path,
+                )
+
+    def test_save_calibration_history_accepts_none_scenario(self):
+        """inferred_scenario=None must not raise and is written as null."""
+        import json, tempfile, os
+        from output.tracker import save_calibration_history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "calibration_history.json")
+            save_calibration_history(
+                stage=1, date="2026-05-09", stage_type="flat",
+                inferred_scenario=None,
+                brier_p_win=0.04, brier_p_top15=0.12, n_riders_scored=8,
+                path=path,
+            )
+            entry = json.load(open(path))[0]
+        assert entry["inferred_scenario"] is None
+
 
 if __name__ == "__main__":
     unittest.main()

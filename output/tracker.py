@@ -11,7 +11,21 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
 from typing import Optional
+
+
+# ── Valid inferred scenarios ──────────────────────────────────────────────────
+
+VALID_SCENARIOS: frozenset = frozenset({
+    "bunch_sprint",
+    "reduced_sprint",
+    "breakaway",
+    "gc_day",
+    "itt",
+    "",       # empty string = not yet filled in (acceptable at settle time)
+    None,     # None = not yet filled in
+})
 
 
 # ── ProbAccuracy schema ───────────────────────────────────────────────────────
@@ -175,6 +189,10 @@ def compute_stage_brier(accuracy_records: list[ProbAccuracy]) -> dict:
     Compute average Brier scores for p_win and p_top15 from a stage's accuracy records.
 
     Returns a dict with keys: brier_p_win, brier_p_top15, n_riders_scored.
+
+    NOTE: Brier score computed on team riders only (n ≈ 8).
+    Small sample — treat as directional signal, not calibration ground truth.
+    Full-field scoring is deferred to Session 19.
     """
     win_scores = [r.model_brier for r in accuracy_records if r.event == "win"]
     top15_scores = [r.model_brier for r in accuracy_records if r.event == "top15"]
@@ -189,14 +207,24 @@ def save_calibration_history(
     stage: int,
     date: str,
     stage_type: str,
-    inferred_scenario: str,
+    inferred_scenario: Optional[str],
     brier_p_win: float,
     brier_p_top15: float,
     n_riders_scored: int,
     notes: str = "",
+    stage_result_type: Optional[str] = None,
     path: str = "data/calibration_history.json",
 ) -> None:
-    """Append one stage calibration entry to calibration_history.json."""
+    """Append one stage calibration entry to calibration_history.json.
+
+    scope is always "team_only" — distinguishes from future full-field Brier (Session 19).
+    inferred_scenario must be a VALID_SCENARIOS member or ValueError is raised.
+    """
+    if inferred_scenario not in VALID_SCENARIOS:
+        raise ValueError(
+            f"Invalid inferred_scenario {inferred_scenario!r}. "
+            f"Valid values: {sorted(s for s in VALID_SCENARIOS if s)}"
+        )
     entry = {
         "stage": stage,
         "date": date,
@@ -206,6 +234,9 @@ def save_calibration_history(
         "brier_p_top15": round(brier_p_top15, 6),
         "n_riders_scored": n_riders_scored,
         "notes": notes,
+        "scope": "team_only",
+        "stage_result_type": stage_result_type,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
     history: list = []
     if os.path.exists(path):

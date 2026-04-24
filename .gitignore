@@ -1,6 +1,7 @@
 .env
 data/state.json
 data/riders.json
+data/api_snapshots/stage*_*.json
 __pycache__/
 *.pyc
 .pytest_cache/

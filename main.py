@@ -713,6 +713,34 @@ def cmd_settle(args) -> None:
     print(f"\nState saved. Bank: {new_bank/1e6:.3f}M")
 
 
+def _save_api_snapshot(stage_n: int, riders: list) -> None:
+    """Persist live riders list to data/api_snapshots/stage{N}_riders.json."""
+    from dataclasses import asdict as _asdict
+    snapshot_dir = "data/api_snapshots"
+    os.makedirs(snapshot_dir, exist_ok=True)
+    path = os.path.join(snapshot_dir, f"stage{stage_n}_riders.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump([_asdict(r) for r in riders], fh, indent=2, ensure_ascii=False)
+    print(f"  Snapshot saved → {path}")
+
+
+def _print_ownership_stats(riders: list) -> None:
+    """Print ownership/popularity stats. Warns if field is null or constant."""
+    values = [
+        getattr(r, "popularity", None)
+        for r in riders
+        if getattr(r, "popularity", None) is not None
+    ]
+    if not values:
+        print("  Ownership: all null — field not yet live")
+    elif all(v == values[0] for v in values):
+        print(f"  ⚠️  Ownership: all riders share value {values[0]} — likely placeholder")
+    else:
+        print(f"  Ownership populated ({len(values)} riders): "
+              f"min={min(values):.3f}  max={max(values):.3f}  "
+              f"mean={sum(values)/len(values):.3f}")
+
+
 def cmd_validate(args) -> None:
     """
     Compare engine-calculated value deltas vs actual Holdet API values for a settled stage.
@@ -770,6 +798,8 @@ def cmd_validate(args) -> None:
         live_riders = fetch_riders(game_id, session=session)
         fresh_map = {r.holdet_id: r for r in live_riders}
         print(f"  Fetched {len(live_riders)} riders from Holdet API.")
+        _save_api_snapshot(args.stage, live_riders)
+        _print_ownership_stats(live_riders)
     except (EnvironmentError, KeyError):
         print("  Using local riders.json (HOLDET_GAME_ID not configured).", file=sys.stderr)
         fresh_map = all_riders_dict
@@ -788,10 +818,11 @@ def cmd_validate(args) -> None:
     matches = 0
     total = 0
     discrepancies: list = []
+    scored_diffs: list = []
 
     print(f"\nValidating Stage {args.stage}:")
-    print(f"  {'Rider':<25} {'Engine':>10} {'Actual':>10} {'Δ':>8}  Status")
-    print(f"  {'-'*25} {'-'*10} {'-'*10} {'-'*8}  ------")
+    print(f"  {'Rider':<25} {'Engine':>10} {'Actual':>10} {'Δ':>8} {'RelDiff':>8}  Flag")
+    print(f"  {'-'*25} {'-'*10} {'-'*10} {'-'*8} {'-'*8}  ----")
 
     for rid in my_team:
         r = all_riders_dict.get(rid)
@@ -811,26 +842,30 @@ def cmd_validate(args) -> None:
 
         if rid not in fresh_map or rid not in value_snapshot:
             reason = "no snapshot" if rid not in value_snapshot else "no live data"
-            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'—':>10} {'—':>8}  ({reason})")
+            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'—':>10} {'—':>8} {'—':>8}  ({reason})")
             continue
 
         actual_delta = fresh_map[rid].value - value_snapshot[rid]
 
         if actual_delta == 0:
             # Holdet hasn't processed the stage yet — skip
-            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'0':>10} {'—':>8}  (no change detected)")
+            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'0':>10} {'—':>8} {'—':>8}  (no change detected)")
             continue
 
         diff = actual_delta - engine_delta
-        match = abs(diff) <= 1000
-        status = "OK" if match else "MISMATCH"
+        abs_diff = abs(diff)
+        rel_diff = abs_diff / max(1, abs(actual_delta))
+        flag = "⚠️" if (abs_diff > 5000 or rel_diff > 0.25) else ""
+        match = not flag
         if match:
             matches += 1
         else:
             discrepancies.append(r.name)
             _log_mismatch(args.stage, r.name, "total_rider_value_delta", engine_delta, actual_delta)
         total += 1
-        print(f"  {'V' if match else 'X'}   {r.name:<24} {engine_delta:>+10,} {actual_delta:>+10,} {diff:>+8,}  {status}")
+        scored_diffs.append(diff)
+        print(f"  {'✓' if match else '✗'}   {r.name:<24} {engine_delta:>+10,} "
+              f"{actual_delta:>+10,} {diff:>+8,} {rel_diff:>8.0%}  {flag or 'OK'}")
 
     print(f"\nEngine matched {matches}/{total} riders.")
     if discrepancies:
@@ -838,6 +873,21 @@ def cmd_validate(args) -> None:
         print("See tests/validation_log.md for details.")
     elif total > 0:
         print("All riders match. ✓")
+
+    # Systemic summary — always print when there are scored riders
+    if scored_diffs:
+        mean_diff = sum(scored_diffs) / len(scored_diffs)
+        median_diff = sorted(scored_diffs)[len(scored_diffs) // 2]
+        over = sum(1 for d in scored_diffs if d > 0)
+        under = sum(1 for d in scored_diffs if d < 0)
+
+        print(f"\nValidation summary ({len(scored_diffs)} riders scored):")
+        print(f"  Mean diff:             {mean_diff:>+10,.0f}")
+        print(f"  Median diff:           {median_diff:>+10,.0f}")
+        print(f"  Overpredicted riders:  {over}/{len(scored_diffs)}")
+        print(f"  Underpredicted riders: {under}/{len(scored_diffs)}")
+        if abs(mean_diff) > 3000:
+            print("  ⚠️  Consistent bias detected — check for systemic scoring error")
 
 
 def cmd_roles(args) -> None:
@@ -896,6 +946,33 @@ def cmd_roles(args) -> None:
         )
 
 
+def cmd_calibration(args) -> None:
+    """Print the calibration history table from data/calibration_history.json. Read-only."""
+    cal_path = os.getenv("CALIBRATION_HISTORY_PATH", "data/calibration_history.json")
+    if not os.path.exists(cal_path):
+        print("No calibration history yet. Run 'settle' after at least one stage.")
+        return
+
+    with open(cal_path, encoding="utf-8") as fh:
+        history = json.load(fh)
+
+    if not history:
+        print("Calibration history is empty.")
+        return
+
+    print("\nCalibration history (team-only, n≈8 per stage):\n")
+    print(f"  {'Stage':>5}  {'Type':<9} {'p_win':>7} {'p_top15':>8}  {'Scenario':<14}  {'Date'}")
+    print(f"  {'-'*5}  {'-'*9} {'-'*7} {'-'*8}  {'-'*14}  {'-'*10}")
+    for e in history:
+        scenario = e.get("inferred_scenario") or "—"
+        print(
+            f"  {e['stage']:>5}  {e.get('stage_type',''):<9} "
+            f"{e['brier_p_win']:>7.4f} {e['brier_p_top15']:>8.4f}  "
+            f"{scenario:<14}  {e.get('date', '')}"
+        )
+    print("\nNote: small sample — do not tune until 3+ stages of same type.")
+
+
 def cmd_status(args) -> None:
     """Show current team, bank, rank, and DNS alerts."""
     riders_path = config.get_riders_path()
@@ -939,6 +1016,9 @@ def main() -> None:
     p_roles = sub.add_parser("roles", help="Show rider role classification and scenario multipliers")
     p_roles.add_argument("--stage", type=int, required=True, help="Stage number to classify for")
 
+    # calibration
+    sub.add_parser("calibration", help="Print calibration history table")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -953,6 +1033,8 @@ def main() -> None:
         cmd_validate(args)
     elif args.command == "roles":
         cmd_roles(args)
+    elif args.command == "calibration":
+        cmd_calibration(args)
 
 
 if __name__ == "__main__":

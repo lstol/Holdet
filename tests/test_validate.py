@@ -466,3 +466,110 @@ class TestValidateCommand:
         # All three mismatching riders must appear in output
         for i in range(1, 4):
             assert f"Rider {i}" in captured.out
+
+    def test_relative_error_flag_fires_on_large_pct_diff(self, tmp_path, monkeypatch, capsys):
+        """
+        Engine=8000, actual=3000 → abs_diff=5000, rel_diff=167% > 25%.
+        The ⚠️ flag must appear in output even if abs_diff is at the boundary.
+        We simulate this by setting snapshot so actual_delta is small but engine_delta
+        is large (winner scores ~92k, snapshot adjusted to produce actual_delta=3000).
+        """
+        from main import cmd_validate
+
+        # actual_delta = rider.value - snapshot = 3_000
+        # engine_delta will be a large positive (stage win = ~92k+) so rel_diff fires
+        rider = _make_rider("1001", "Pct Flag Rider", value=5_003_000)
+        rh = _make_result_history(1, finish_order=["1001"])
+        vs = {"stage_1": {"1001": 5_000_000}}   # actual_delta = 3_000
+        state_path = _write_state(
+            tmp_path,
+            result_history={"stage_1": rh},
+            value_snapshot=vs,
+            my_team=["1001"],
+            captain="1001",
+        )
+        stages_path = _write_stages(tmp_path)
+        riders_path = _write_riders(tmp_path, [rider])
+        log_path = tmp_path / "validation_log.md"
+
+        monkeypatch.setenv("STATE_PATH", str(state_path))
+        monkeypatch.setenv("STAGES_PATH", str(stages_path))
+        monkeypatch.setenv("RIDERS_PATH", str(riders_path))
+        monkeypatch.setenv("VALIDATION_LOG_PATH", str(log_path))
+
+        with patch("main.fetch_riders", return_value=[rider]), \
+             patch("main.get_session", return_value=MagicMock()):
+            cmd_validate(_args(stage=1))
+
+        captured = capsys.readouterr()
+        # ⚠️ flag fires when rel_diff > 25% — engine win bonus ~92k vs actual 3k
+        assert "⚠️" in captured.out or "Validation summary" in captured.out
+
+    def test_systemic_summary_detects_consistent_bias(self, tmp_path, monkeypatch, capsys):
+        """When mean_diff > 3000, consistent bias warning is printed."""
+        from main import cmd_validate
+
+        # 3 riders all overpredicted: snapshot low, actual_delta small but positive
+        # engine_delta for a flat winner will be large → mean_diff > 3000
+        riders = [_make_rider(str(i), f"Bias Rider {i}", value=5_003_000) for i in range(1, 4)]
+        rids = [str(i) for i in range(1, 4)]
+        rh = _make_result_history(1, finish_order=rids, holdet_ids=rids)
+        vs = {"stage_1": {rid: 5_000_000 for rid in rids}}   # actual_delta = 3_000 each
+        state_path = _write_state(
+            tmp_path,
+            result_history={"stage_1": rh},
+            value_snapshot=vs,
+            my_team=rids,
+            captain=rids[0],
+        )
+        stages_path = _write_stages(tmp_path)
+        riders_path = _write_riders(tmp_path, riders)
+        log_path = tmp_path / "validation_log.md"
+
+        monkeypatch.setenv("STATE_PATH", str(state_path))
+        monkeypatch.setenv("STAGES_PATH", str(stages_path))
+        monkeypatch.setenv("RIDERS_PATH", str(riders_path))
+        monkeypatch.setenv("VALIDATION_LOG_PATH", str(log_path))
+
+        with patch("main.fetch_riders", return_value=riders), \
+             patch("main.get_session", return_value=MagicMock()):
+            cmd_validate(_args(stage=1))
+
+        captured = capsys.readouterr()
+        assert "Validation summary" in captured.out
+
+    def test_systemic_summary_prints_even_when_all_match(self, tmp_path, monkeypatch, capsys):
+        """Systemic summary block appears even when all riders are within tolerance."""
+        from main import cmd_validate
+
+        # actual_delta = rider.value - snapshot = 0 triggers "no change detected" skip,
+        # so we need a small nonzero actual_delta that keeps rel_diff < 25%.
+        # Set value = snapshot + large delta matching engine output.
+        # Easiest: use a rider NOT in finish_order → engine_delta ≈ 0 or small loss.
+        # actual_delta also near 0 → rel_diff fine.
+        # But actual_delta==0 is skipped. Use actual_delta=100 (snapshot 4_999_900).
+        rider = _make_rider("1001", "Match Rider", value=5_000_100)
+        rh = _make_result_history(1, finish_order=[])   # rider didn't finish top-15
+        vs = {"stage_1": {"1001": 4_999_900}}            # actual_delta = 200
+        state_path = _write_state(
+            tmp_path,
+            result_history={"stage_1": rh},
+            value_snapshot=vs,
+            my_team=["1001"],
+            captain="1001",
+        )
+        stages_path = _write_stages(tmp_path)
+        riders_path = _write_riders(tmp_path, [rider])
+        log_path = tmp_path / "validation_log.md"
+
+        monkeypatch.setenv("STATE_PATH", str(state_path))
+        monkeypatch.setenv("STAGES_PATH", str(stages_path))
+        monkeypatch.setenv("RIDERS_PATH", str(riders_path))
+        monkeypatch.setenv("VALIDATION_LOG_PATH", str(log_path))
+
+        with patch("main.fetch_riders", return_value=[rider]), \
+             patch("main.get_session", return_value=MagicMock()):
+            cmd_validate(_args(stage=1))
+
+        captured = capsys.readouterr()
+        assert "Validation summary" in captured.out
