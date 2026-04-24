@@ -238,6 +238,7 @@ def save_calibration_history(
         "stage_result_type": stage_result_type,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
+    import warnings
     history: list = []
     if os.path.exists(path):
         try:
@@ -245,6 +246,15 @@ def save_calibration_history(
                 history = json.load(fh)
         except (json.JSONDecodeError, OSError):
             pass
+
+    if any(e.get("stage") == stage for e in history):
+        warnings.warn(
+            f"Calibration entry for stage {stage} already exists. "
+            "Appending anyway for audit trail — check for accidental re-run.",
+            stacklevel=2,
+        )
+        entry["notes"] = (entry.get("notes") or "") + " [RERUN]"
+
     history.append(entry)
     tmp = path + ".tmp"
     os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)

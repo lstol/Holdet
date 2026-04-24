@@ -2,6 +2,7 @@
 data/state.json
 data/riders.json
 data/api_snapshots/stage*_*.json
+data/validation/stage*.json
 __pycache__/
 *.pyc
 .pytest_cache/

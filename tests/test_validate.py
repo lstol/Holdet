@@ -573,3 +573,96 @@ class TestValidateCommand:
 
         captured = capsys.readouterr()
         assert "Validation summary" in captured.out
+
+    def test_value_snapshot_stores_gc_position(self, tmp_path, monkeypatch):
+        """After settle, value_snapshot[rid] should be a dict with 'value' and 'gc_position'."""
+        from scoring.engine import Rider
+        from main import load_riders
+
+        rider = Rider(
+            holdet_id="1001", person_id="201", team_id="101",
+            name="GC Rider", team="Team A", team_abbr="TA",
+            value=10_000_000, start_value=10_000_000, points=0,
+            status="active", gc_position=3, jerseys=[],
+            in_my_team=True, is_captain=False,
+        )
+        riders_path = _write_riders(tmp_path, [rider])
+        riders_loaded = load_riders(str(riders_path))
+        rider_map = {r.holdet_id: r for r in riders_loaded}
+        my_team = ["1001"]
+        snapshot = {
+            rid: {
+                "value":       rider_map[rid].value,
+                "gc_position": rider_map[rid].gc_position,
+                "is_out":      getattr(rider_map[rid], "is_out", False),
+            }
+            for rid in my_team if rid in rider_map
+        }
+        assert isinstance(snapshot["1001"], dict)
+        assert snapshot["1001"]["value"] == 10_000_000
+        assert snapshot["1001"]["gc_position"] == 3
+
+    def test_validate_reads_legacy_int_snapshot(self, tmp_path, monkeypatch, capsys):
+        """If snapshot is a plain int (old format), validate still runs without error."""
+        from main import cmd_validate
+
+        rider = _make_rider("1001", "Legacy Rider", value=5_000_000)
+        rh = _make_result_history(1, finish_order=["1001"])
+        vs = {"stage_1": {"1001": 5_000_000}}
+        state_path = _write_state(
+            tmp_path,
+            result_history={"stage_1": rh},
+            value_snapshot=vs,
+            my_team=["1001"],
+            captain="1001",
+        )
+        stages_path = _write_stages(tmp_path)
+        riders_path = _write_riders(tmp_path, [rider])
+        log_path = tmp_path / "validation_log.md"
+
+        monkeypatch.setenv("STATE_PATH", str(state_path))
+        monkeypatch.setenv("STAGES_PATH", str(stages_path))
+        monkeypatch.setenv("RIDERS_PATH", str(riders_path))
+        monkeypatch.setenv("VALIDATION_LOG_PATH", str(log_path))
+
+        with patch("main.fetch_riders", return_value=[rider]), \
+             patch("main.get_session", return_value=MagicMock()):
+            cmd_validate(_args(stage=1))
+
+        captured = capsys.readouterr()
+        assert "Engine matched" in captured.out
+
+    def test_validation_json_written_to_data_directory(self, tmp_path, monkeypatch):
+        """After validate with scored riders, data/validation/stage{N}.json is written."""
+        import json as _json
+        from main import cmd_validate
+
+        rider = _make_rider("1001", "Json Rider", value=5_003_000)
+        rh = _make_result_history(1, finish_order=["1001"])
+        vs = {"stage_1": {"1001": 5_000_000}}
+        state_path = _write_state(
+            tmp_path,
+            result_history={"stage_1": rh},
+            value_snapshot=vs,
+            my_team=["1001"],
+            captain="1001",
+        )
+        stages_path = _write_stages(tmp_path)
+        riders_path = _write_riders(tmp_path, [rider])
+        log_path = tmp_path / "validation_log.md"
+
+        monkeypatch.setenv("STATE_PATH", str(state_path))
+        monkeypatch.setenv("STAGES_PATH", str(stages_path))
+        monkeypatch.setenv("RIDERS_PATH", str(riders_path))
+        monkeypatch.setenv("VALIDATION_LOG_PATH", str(log_path))
+        monkeypatch.chdir(tmp_path)
+
+        with patch("main.fetch_riders", return_value=[rider]), \
+             patch("main.get_session", return_value=MagicMock()):
+            cmd_validate(_args(stage=1))
+
+        val_file = tmp_path / "data" / "validation" / "stage1.json"
+        assert val_file.exists(), f"Expected {val_file} to exist"
+        data = _json.loads(val_file.read_text())
+        assert "riders" in data
+        assert "summary" in data

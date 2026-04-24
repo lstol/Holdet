@@ -393,5 +393,80 @@ class TestComputeStageBrier(unittest.TestCase):
         assert entry["inferred_scenario"] is None
 
 
+    def test_save_calibration_history_warns_on_duplicate_stage(self):
+        """Calling save twice for stage=1 emits a UserWarning."""
+        import json, tempfile, os, warnings
+        from output.tracker import save_calibration_history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "calibration_history.json")
+            save_calibration_history(
+                stage=1, date="2026-05-09", stage_type="flat",
+                inferred_scenario="bunch_sprint",
+                brier_p_win=0.04, brier_p_top15=0.12, n_riders_scored=8,
+                path=path,
+            )
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                save_calibration_history(
+                    stage=1, date="2026-05-09", stage_type="flat",
+                    inferred_scenario="bunch_sprint",
+                    brier_p_win=0.04, brier_p_top15=0.12, n_riders_scored=8,
+                    path=path,
+                )
+            assert len(caught) == 1
+            assert issubclass(caught[0].category, UserWarning)
+            assert "stage 1 already exists" in str(caught[0].message).lower()
+
+    def test_duplicate_entry_marked_with_rerun_note(self):
+        """Second entry for same stage has '[RERUN]' in notes field."""
+        import json, tempfile, os, warnings
+        from output.tracker import save_calibration_history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "calibration_history.json")
+            save_calibration_history(
+                stage=1, date="2026-05-09", stage_type="flat",
+                inferred_scenario="bunch_sprint",
+                brier_p_win=0.04, brier_p_top15=0.12, n_riders_scored=8,
+                path=path,
+            )
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")
+                save_calibration_history(
+                    stage=1, date="2026-05-09", stage_type="flat",
+                    inferred_scenario="bunch_sprint",
+                    brier_p_win=0.05, brier_p_top15=0.13, n_riders_scored=8,
+                    path=path,
+                )
+            history = json.load(open(path))
+        assert len(history) == 2
+        assert "[RERUN]" in history[1]["notes"]
+
+    def test_calibration_history_not_blocked_on_duplicate(self):
+        """Second entry IS appended even after the duplicate warning (audit trail preserved)."""
+        import json, tempfile, os, warnings
+        from output.tracker import save_calibration_history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "calibration_history.json")
+            save_calibration_history(
+                stage=1, date="2026-05-09", stage_type="flat",
+                inferred_scenario="bunch_sprint",
+                brier_p_win=0.04, brier_p_top15=0.12, n_riders_scored=8,
+                path=path,
+            )
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")
+                save_calibration_history(
+                    stage=1, date="2026-05-09", stage_type="flat",
+                    inferred_scenario="bunch_sprint",
+                    brier_p_win=0.05, brier_p_top15=0.13, n_riders_scored=8,
+                    path=path,
+                )
+            history = json.load(open(path))
+        assert len(history) == 2, "Both entries must be present for audit trail"
+
+
 if __name__ == "__main__":
     unittest.main()

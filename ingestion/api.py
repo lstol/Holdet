@@ -463,3 +463,43 @@ def load_riders(path: str) -> list:
         filtered = {k: v for k, v in raw.items() if k in rider_fields}
         riders.append(Rider(**filtered))
     return riders
+
+
+def normalise_ownership(riders: list) -> tuple:
+    """
+    Detect and normalise ownership/popularity values on a list of Rider-like objects.
+
+    The Holdet API may return popularity in 0–100 scale (integers) or 0–1 scale
+    (floats). This function detects which scale is in use and normalises to 0–1
+    in-place if necessary.
+
+    Parameters
+    ----------
+    riders : list
+        Riders with an optional `popularity` attribute.
+
+    Returns
+    -------
+    (riders, was_normalised, max_val)
+        riders         — same list, popularity values updated if normalised
+        was_normalised — True if values were divided by 100
+        max_val        — max popularity seen before normalisation (None if no values)
+    """
+    values = [
+        getattr(r, "popularity", None)
+        for r in riders
+        if getattr(r, "popularity", None) is not None
+    ]
+    if not values:
+        return riders, False, None
+
+    max_val = max(values)
+    if max_val > 1.5:
+        for r in riders:
+            pop = getattr(r, "popularity", None)
+            if pop is not None:
+                object.__setattr__(r, "popularity", pop / 100.0) if hasattr(r, "__dataclass_fields__") \
+                    else setattr(r, "popularity", pop / 100.0)
+        return riders, True, max_val
+
+    return riders, False, max_val

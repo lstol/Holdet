@@ -558,8 +558,15 @@ def cmd_settle(args) -> None:
         gc_standings=gc_standings,
     )
 
-    # Snapshot rider values before this stage (for validate command)
-    value_snapshot = {rid: rider_map[rid].value for rid in my_team if rid in rider_map}
+    # Snapshot rider state before this stage (for validate command)
+    value_snapshot = {
+        rid: {
+            "value":       rider_map[rid].value,
+            "gc_position": rider_map[rid].gc_position,
+            "is_out":      getattr(rider_map[rid], "is_out", False),
+        }
+        for rid in my_team if rid in rider_map
+    }
 
     # Score all team riders
     all_riders_dict = {r.holdet_id: r for r in riders}
@@ -724,8 +731,14 @@ def _save_api_snapshot(stage_n: int, riders: list) -> None:
     print(f"  Snapshot saved → {path}")
 
 
-def _print_ownership_stats(riders: list) -> None:
-    """Print ownership/popularity stats. Warns if field is null or constant."""
+def _print_ownership_stats(riders: list) -> list:
+    """
+    Print ownership/popularity stats, normalise 0-100 scale to 0-1 in-place.
+    Warns if field is null or constant. Returns the (possibly updated) riders list.
+    """
+    from ingestion.api import normalise_ownership
+    riders, was_normalised, max_val = normalise_ownership(riders)
+
     values = [
         getattr(r, "popularity", None)
         for r in riders
@@ -736,9 +749,12 @@ def _print_ownership_stats(riders: list) -> None:
     elif all(v == values[0] for v in values):
         print(f"  ⚠️  Ownership: all riders share value {values[0]} — likely placeholder")
     else:
+        if was_normalised:
+            print(f"  ⚠️  Ownership was in 0–100 scale (max={max_val:.1f}) — normalised to 0–1")
         print(f"  Ownership populated ({len(values)} riders): "
               f"min={min(values):.3f}  max={max(values):.3f}  "
               f"mean={sum(values)/len(values):.3f}")
+    return riders
 
 
 def cmd_validate(args) -> None:
@@ -819,10 +835,11 @@ def cmd_validate(args) -> None:
     total = 0
     discrepancies: list = []
     scored_diffs: list = []
+    scored_records: list = []
 
     print(f"\nValidating Stage {args.stage}:")
-    print(f"  {'Rider':<25} {'Engine':>10} {'Actual':>10} {'Δ':>8} {'RelDiff':>8}  Flag")
-    print(f"  {'-'*25} {'-'*10} {'-'*10} {'-'*8} {'-'*8}  ----")
+    print(f"  {'Rider':<25} {'Engine':>10} {'Actual':>10} {'Δ':>8} {'RelDiff':>8}  GC      Flag")
+    print(f"  {'-'*25} {'-'*10} {'-'*10} {'-'*8} {'-'*8}  ------  ----")
 
     for rid in my_team:
         r = all_riders_dict.get(rid)
@@ -842,14 +859,25 @@ def cmd_validate(args) -> None:
 
         if rid not in fresh_map or rid not in value_snapshot:
             reason = "no snapshot" if rid not in value_snapshot else "no live data"
-            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'—':>10} {'—':>8} {'—':>8}  ({reason})")
+            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'—':>10} {'—':>8} {'—':>8}  —       ({reason})")
             continue
 
-        actual_delta = fresh_map[rid].value - value_snapshot[rid]
+        # Support both new dict format and legacy plain-int format
+        snap = value_snapshot[rid]
+        if isinstance(snap, dict):
+            pre_value  = snap["value"]
+            pre_gc     = snap.get("gc_position")
+            pre_is_out = snap.get("is_out", False)
+        else:
+            pre_value  = snap
+            pre_gc     = None
+            pre_is_out = None
+
+        actual_delta = fresh_map[rid].value - pre_value
 
         if actual_delta == 0:
             # Holdet hasn't processed the stage yet — skip
-            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'0':>10} {'—':>8} {'—':>8}  (no change detected)")
+            print(f"  ⚠   {r.name:<24} {engine_delta:>+10,} {'0':>10} {'—':>8} {'—':>8}  —       (no change detected)")
             continue
 
         diff = actual_delta - engine_delta
@@ -857,6 +885,7 @@ def cmd_validate(args) -> None:
         rel_diff = abs_diff / max(1, abs(actual_delta))
         flag = "⚠️" if (abs_diff > 5000 or rel_diff > 0.25) else ""
         match = not flag
+        gc_note = f"GC@{pre_gc}" if pre_gc is not None else "GC=?"
         if match:
             matches += 1
         else:
@@ -864,8 +893,18 @@ def cmd_validate(args) -> None:
             _log_mismatch(args.stage, r.name, "total_rider_value_delta", engine_delta, actual_delta)
         total += 1
         scored_diffs.append(diff)
+        scored_records.append({
+            "holdet_id":    rid,
+            "name":         r.name,
+            "engine_delta": engine_delta,
+            "actual_delta": actual_delta,
+            "diff":         diff,
+            "rel_diff":     round(rel_diff, 4),
+            "gc_position":  pre_gc,
+            "flag":         bool(flag),
+        })
         print(f"  {'✓' if match else '✗'}   {r.name:<24} {engine_delta:>+10,} "
-              f"{actual_delta:>+10,} {diff:>+8,} {rel_diff:>8.0%}  {flag or 'OK'}")
+              f"{actual_delta:>+10,} {diff:>+8,} {rel_diff:>8.0%}  {gc_note:<6}  {flag or 'OK'}")
 
     print(f"\nEngine matched {matches}/{total} riders.")
     if discrepancies:
@@ -875,6 +914,10 @@ def cmd_validate(args) -> None:
         print("All riders match. ✓")
 
     # Systemic summary — always print when there are scored riders
+    mean_diff = 0.0
+    median_diff = 0
+    over = 0
+    under = 0
     if scored_diffs:
         mean_diff = sum(scored_diffs) / len(scored_diffs)
         median_diff = sorted(scored_diffs)[len(scored_diffs) // 2]
@@ -888,6 +931,28 @@ def cmd_validate(args) -> None:
         print(f"  Underpredicted riders: {under}/{len(scored_diffs)}")
         if abs(mean_diff) > 3000:
             print("  ⚠️  Consistent bias detected — check for systemic scoring error")
+
+    # Persist structured validation record
+    if scored_records:
+        bias = "over" if mean_diff > 2000 else "under" if mean_diff < -2000 else "neutral"
+        validation_record = {
+            "stage":   args.stage,
+            "date":    datetime.now().strftime("%Y-%m-%d"),
+            "riders":  scored_records,
+            "summary": {
+                "mean_diff":     round(mean_diff),
+                "median_diff":   round(median_diff),
+                "overpredicted": over,
+                "underpredicted": under,
+                "n_scored":      len(scored_diffs),
+                "bias":          bias,
+            },
+        }
+        os.makedirs("data/validation", exist_ok=True)
+        val_path = f"data/validation/stage{args.stage}.json"
+        with open(val_path, "w", encoding="utf-8") as fh:
+            json.dump(validation_record, fh, indent=2, ensure_ascii=False)
+        print(f"\n  Validation record saved → {val_path}")
 
 
 def cmd_roles(args) -> None:

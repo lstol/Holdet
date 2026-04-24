@@ -395,3 +395,36 @@ class TestProbeExtraEndpoints:
         for val in result.values():
             assert val["status"] is None
             assert isinstance(val["data"], str)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestNormaliseOwnership
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestNormaliseOwnership:
+
+    def _make_rider(self, holdet_id="1", popularity=None):
+        """Simple namespace object with a popularity attribute."""
+        class FakeRider:
+            pass
+        r = FakeRider()
+        r.holdet_id = holdet_id
+        r.popularity = popularity
+        return r
+
+    def test_ownership_scale_normalised_when_over_1(self):
+        """popularity=73 (0-100 scale) is normalised to 0.73."""
+        from ingestion.api import normalise_ownership
+        riders = [self._make_rider("1", popularity=73.0)]
+        updated, was_normalised, max_val = normalise_ownership(riders)
+        assert was_normalised is True
+        assert abs(updated[0].popularity - 0.73) < 1e-9
+        assert max_val == 73.0
+
+    def test_ownership_scale_left_unchanged_when_fractional(self):
+        """popularity=0.73 (0-1 scale) stays 0.73, no normalisation applied."""
+        from ingestion.api import normalise_ownership
+        riders = [self._make_rider("1", popularity=0.73)]
+        updated, was_normalised, max_val = normalise_ownership(riders)
+        assert was_normalised is False
+        assert abs(updated[0].popularity - 0.73) < 1e-9
