@@ -44,9 +44,12 @@ from scoring.optimizer import (
     _eval_team,
     _eval_cache,
     NOISE_FLOOR,
+    apply_intent_to_ev,
+    compute_transfer_penalty,
 )
 from scoring.probabilities import RiderProb
 from scoring.simulator import SimResult, TeamSimResult
+from scoring.stage_intent import StageIntent, compute_stage_intent
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1238,3 +1241,134 @@ class TestDiffBasedTransferReporting:
                 f"Profile {profile.value}: expected 8 riders after transfers, "
                 f"got {len(final)}: {sorted(final)}"
             )
+
+
+# ── TestOptimizeAcceptsIntent (Session 18) ────────────────────────────────────
+
+class TestOptimizeAcceptsIntent:
+    """Smoke tests: optimize() and optimize_all_profiles() accept intent param."""
+
+    def _make_args(self):
+        pool, ids, sr = _build_pool()
+        stage = _flat_stage()
+        return pool, ids, sr, stage
+
+    def test_optimize_accepts_none_intent_without_error(self):
+        import scoring.optimizer as opt_mod
+        opt_mod._eval_cache.clear()
+        pool, ids, sr, stage = self._make_args()
+        rec = optimize(
+            riders=pool,
+            my_team=ids,
+            stage=stage,
+            probs={},
+            sim_results=sr,
+            bank=50_000_000,
+            risk_profile=RiskProfile.BALANCED,
+            rank=None,
+            total_participants=None,
+            stages_remaining=10,
+            n_sim=10,
+            intent=None,
+        )
+        assert rec.captain in {r.holdet_id for r in pool}
+
+    def test_optimize_accepts_stage_intent_without_error(self):
+        import scoring.optimizer as opt_mod
+        opt_mod._eval_cache.clear()
+        pool, ids, sr, stage = self._make_args()
+        intent = compute_stage_intent(stage, {}, next_stage=None, riders=pool)
+        rec = optimize(
+            riders=pool,
+            my_team=ids,
+            stage=stage,
+            probs={},
+            sim_results=sr,
+            bank=50_000_000,
+            risk_profile=RiskProfile.BALANCED,
+            rank=None,
+            total_participants=None,
+            stages_remaining=10,
+            n_sim=10,
+            intent=intent,
+        )
+        assert rec.captain in {r.holdet_id for r in pool}
+
+    def test_optimize_all_profiles_accepts_intent(self):
+        import scoring.optimizer as opt_mod
+        opt_mod._eval_cache.clear()
+        pool, ids, sr, stage = self._make_args()
+        intent = compute_stage_intent(stage, {}, next_stage=None, riders=pool)
+        results = optimize_all_profiles(
+            riders=pool,
+            my_team=ids,
+            stage=stage,
+            probs={},
+            sim_results=sr,
+            bank=50_000_000,
+            rank=None,
+            total_participants=None,
+            stages_remaining=10,
+            n_sim=10,
+            intent=intent,
+        )
+        assert len(results) == 4
+        for profile in RiskProfile:
+            assert profile in results
+
+
+# ── TestICDLRegressionGuard (Session 18) ─────────────────────────────────────
+
+class TestICDLRegressionGuard:
+    """
+    Regression guard: λ=0 and win_priority=0 must reproduce pre-Session-18 EV.
+
+    When intent.win_priority=0 and lambda=0:
+      adjusted_ev = base_ev * (1 + 0.3 * 0) = base_ev
+      transfer_penalty = fee * (1 + 0) = fee
+      net_ev = base_ev - fee + 0 * next_ev = base_ev - fee
+
+    This must equal the pre-Session-18 single-stage calculation.
+    Ensures ICDL is additive, not destructive.
+    """
+
+    def test_lambda_zero_win_priority_zero_matches_pre_session18_ev(self):
+        base_ev = 150_000.0
+        fee = 30_000
+        next_ev = 999_999.0  # irrelevant when λ=0
+
+        intent = StageIntent(
+            win_priority=0.0,
+            survival_priority=0.5,
+            transfer_pressure=0.0,
+            team_bonus_value=0.5,
+            breakaway_likelihood=0.3,
+        )
+        lambda_val = 0.0
+
+        adjusted_ev = apply_intent_to_ev(base_ev, intent)
+        assert abs(adjusted_ev - base_ev) < 1.0, "win_priority=0 must leave EV unchanged"
+
+        penalty = compute_transfer_penalty(fee, intent)
+        assert abs(penalty - fee) < 1.0, "transfer_pressure=0 must leave fee unchanged"
+
+        net_ev = adjusted_ev - penalty + lambda_val * next_ev
+        pre_session18_net = base_ev - fee
+        assert abs(net_ev - pre_session18_net) < 1.0, (
+            f"ICDL regression: expected {pre_session18_net}, got {net_ev}"
+        )
+
+    def test_anchor_captain_unaffected_by_intent(self):
+        """ANCHOR captain selection is identical with and without intent."""
+        import scoring.optimizer as opt_mod
+        opt_mod._eval_cache.clear()
+        pool, ids, sr = _build_pool()
+        stage = _flat_stage()
+
+        from scoring.optimizer import _pick_captain
+        rider_map = {r.holdet_id: r for r in pool}
+        intent = compute_stage_intent(stage, {}, next_stage=None, riders=pool)
+
+        captain_without = _pick_captain(ids, sr, RiskProfile.ANCHOR, rider_map, intent=None)
+        captain_with = _pick_captain(ids, sr, RiskProfile.ANCHOR, rider_map, intent=intent)
+        assert captain_without == captain_with
