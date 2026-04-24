@@ -462,6 +462,26 @@ post-session bug fixes discovered during live testing.
 
 ---
 
+## Session 16 — Scenario-Aware Simulation + Override + Multi-Stage Architecture Scaffold ✓ COMPLETE (2026-04-24)
+
+**Goal:** Make the simulation responsive to scenario assumptions, expose scenario control to the user,
+and prepare a clean foundation for future multi-stage optimization. Do NOT implement multi-stage optimization.
+
+**What was built:**
+- Pre-flight: diff-based transfer reporting — Stage 1 empty team shows buy 8/sell 0 (no phantom sells)
+- A: `_resolve_scenarios()` + `_normalize_scenarios()` + upgraded `_sample_scenario(dict, rng)`
+- A: `simulate_team()` accepts `scenario_priors`, samples scenario once per sim, tracks `scenario_counts`
+- A: `TeamSimResult.scenario_stats` populated with realized scenario frequencies
+- A: `simulate_stage_outcome()` accepts optional `scenario` + `roles_map` (backward-compatible)
+- B: `_build_weights()` upgraded to use `_rider_roles()` via pre-computed `roles_map` (max multiplier across all roles); `_rider_type()` no longer called from `_build_weights`
+- C+D: API `BriefRequest.scenario_priors`, `_resolve_scenarios` called at request time, threaded through full optimizer stack; response includes both `scenario_priors` and `scenario_stats`
+- E: Frontend `team_note` yellow banner; scenario sliders with proportional normalization + 500ms debounce; prior vs realized stats display
+- G: `docs/MULTI_STAGE_ARCHITECTURE.md` — full scaffold (state, action, transition, evaluation function signatures + design principles + blockers)
+
+**429/429 tests passing (+14 new). See SESSION_16_SUMMARY.md.**
+
+---
+
 ## Session 15-Fixes — Cache Key, Threshold, Role Precedence, Etapebonus Diagnostics ✓ COMPLETE (2026-04-22)
 
 **Goal:** Five targeted fixes to Session 15 — no new features, no scope creep.
