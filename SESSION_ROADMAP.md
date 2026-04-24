@@ -2,7 +2,7 @@
 # Each session has a clear goal, defined inputs, and a done condition.
 # Do not start a session until the previous session's done condition is met.
 # If debugging becomes circular (3+ failed attempts), stop and bring to Claude.ai.
-# Last updated: 2026-04-24
+# Last updated: 2026-04-24 (Session 18 reframe: ICDL v1)
 
 ---
 
@@ -337,7 +337,7 @@ Deploy to Railway so holdet.syndikatet.eu works from any device.
 
 ## Session 11 — Auto-Login + Validate Scaffolding ✓ COMPLETE (2026-04-20)
 
-**Goal:** Replace manual cookie with email/password auto-login. Scaffold 
+**Goal:** Replace manual cookie with email/password auto-login. Scaffold
 live engine validation for after Giro start May 9.
 
 **What was built:**
@@ -559,22 +559,20 @@ and prepare a clean foundation for future multi-stage optimization. Do NOT imple
 Validate engine vs Holdet → calibrate probabilities → tune multipliers
 
 **Track B — Decision quality**
-Lookahead → variance-aware profiles → differential picks → strategy layer
+Stage intent → transfer-awareness → lookahead → differential picks
 
 These run in parallel, not sequentially. Track B does not wait for Track A
-to be perfect. Even imperfect probabilities improve decisions when lookahead
-is shallow and based on relative ordering.
+to be perfect.
 
-**The one correction to the previous plan:**
-~~"Do NOT build lookahead before calibration"~~
+**Core principle (locked after Session 18 reframe):**
 
-**Better rule:** Build lookahead early, keep it shallow and testable, trust it
-fully only after calibration confirms the base simulator is directionally correct.
+The system has three layers — build in order:
+1. **State** — what is true right now ✅ Sessions 1–17
+2. **Intent** — what kind of decision does this stage require ← Session 18
+3. **Optimization** — best action given state + intent ← Session 20+
 
-Why this is safe: lookahead at horizon=1 mostly depends on relative rider ordering
-(sprinter vs climber on a flat vs mountain stage), not on precise probability values.
-Even rough calibration is sufficient for this. The biggest current flaw in the tool
-is myopic single-stage decisions — fixing that early has immediate competitive value.
+Lookahead on top of a system with no intent understanding gives confident wrong
+answers. Intent first, optimization second.
 
 ---
 
@@ -604,40 +602,186 @@ Adjustment rule:
 
 ---
 
-### Session 18 — Minimal Lookahead
-**After:** Session 17 complete (engine confirmed correct)
-**Goal:** Fix the biggest current flaw — myopic single-stage decisions.
+### Session 18 — Intelligence-Conditioned Decision Layer (ICDL v1)
+**After:** Session 17 engine validated (|diff| < 5k per rider)
+**Goal:** Give the system understanding of what kind of decision each stage
+is asking for. This is the missing layer between state and optimization.
 
-**Scope: keep it small. No new architecture. No state transitions. Just this:**
+**Why this before lookahead:**
+Lookahead on a system with no intent understanding gives confident wrong answers.
+Intent first → lookahead (Session 20) lands on correct decision structure.
 
-```python
-EV_total = EV_stage_N + λ * EV_stage_N1
+**One pipeline. Four internal parts. No new sessions.**
+
+```
+raw_stage
+    ↓
+compute_stage_intent(stage, gc_state, next_stage)      [18A]
+    ↓
+apply_intelligence_overrides(intent, signals)           [18B]
+    ↓
+generate_priors()                                       [unchanged]
+    ↓
+simulate()                                              [unchanged]
+    ↓
+evaluate_team(net_ev with λ, apply_intent_to_ev)        [18C]
+    ↓
+select_captain(intent-weighted)                         [18C]
+    ↓
+CLI: --override, --lambda, --lookahead flags            [18D]
 ```
 
-Where:
-- `EV_stage_N` = current `simulate_team()` result (already working)
-- `EV_stage_N1` = fast lookahead simulation (n=200) for next stage
-- `λ = 0.85` (tune after 3+ stages of data)
+#### 18A — StageIntent
 
-**What to build:**
-- `optimize()` gains optional `next_stage: Stage | None` parameter
-- If provided, `_eval_team()` adds `λ * lookahead_ev` to the metric
-- Lookahead uses same probs (no new probability inputs needed)
-- New API parameter: `next_stage_type` in `/brief` request body
-- Frontend: optional "Next stage type" selector (flat/hilly/mountain/itt)
-  — if left blank, lookahead is skipped (backward compatible)
+**New file: `scoring/stage_intent.py`**
 
-**Why λ=0.85 and not 1.0:**
-Next-stage EV is less certain (probs may shift, weather, tactics).
-Discount encodes that uncertainty without requiring a formal model.
+```python
+@dataclass
+class StageIntent:
+    win_priority: float        # how much does winning matter today?
+    survival_priority: float   # how bad is DNF / gruppo risk?
+    transfer_pressure: float   # how urgently should we rotate?
+    team_bonus_value: float    # is holding a full team worth it today?
+    breakaway_likelihood: float
 
-**Key constraint:** lookahead runs at n=200, not n=500. Speed matters here —
-4 profiles × candidate evaluation × 2 stages must stay under 10 seconds.
+def compute_stage_intent(
+    stage: Stage,
+    gc_state: GCState,
+    next_stage: Stage | None
+) -> StageIntent:
+    ...
+```
 
-**Done when:** On a sprint→mountain transition, ANCHOR recommends keeping a
-GC climber that pure single-stage ANCHOR would sell. That's the proof it works.
+Purely deterministic. Driven by stage type, GC standings tightness,
+next-stage profile, rider pool structure. No randomness. Fully testable.
 
-**Target: 448 tests passing (+8)**
+Example outputs:
+```
+Flat stage (sprint likely):
+  win_priority=0.9, survival_priority=0.3,
+  transfer_pressure=0.4, team_bonus_value=0.8, breakaway_likelihood=0.2
+
+Mountain stage after flat:
+  win_priority=0.7, survival_priority=0.95,
+  transfer_pressure=0.9, team_bonus_value=0.1, breakaway_likelihood=0.6
+```
+
+#### 18B — Intelligence Overrides (signals, not numeric edits)
+
+**Critical design rule:** Overrides are EVENT SIGNALS, not direct mutations
+of intent fields. This keeps calibration meaningful and EV changes attributable.
+
+```python
+def apply_intelligence_overrides(
+    intent: StageIntent,
+    signals: dict
+) -> StageIntent:
+    # translate signals → intent deltas
+    # never allow direct numeric field assignment from outside
+    ...
+```
+
+**Override format (locked):**
+```json
+{
+  "stage_3": {
+    "signals": {
+      "crosswind_risk": "high",
+      "sprint_train_disruption": "likely"
+    },
+    "reason": "DS confirmed crosswind — echelon risk"
+  }
+}
+```
+
+**Signal → intent delta map** (lives in `scoring/stage_intent.py` as dict,
+one line to add new signals in Session 23):
+
+| Signal | Intent fields affected |
+|--------|----------------------|
+| `crosswind_risk: high` | `breakaway_likelihood ↑`, `survival_priority ↑` |
+| `sprint_train_disruption: likely` | `win_priority ↓` for sprinters, `breakaway_likelihood ↑` |
+| `gc_rider_illness: confirmed` | `survival_priority ↑`, `transfer_pressure ↑` |
+| `stage_shortened: confirmed` | `team_bonus_value ↓` |
+
+Override files live in `overrides/stage_N.json`. Git-tracked. Auditable.
+Reason field is required (reject overrides without it).
+
+#### 18C — Intent-Weighted EV + Captain
+
+**EV function (locked):**
+```python
+adjusted_ev = base_ev * (1 + 0.3 * intent.win_priority)
+transfer_penalty *= (1 + intent.transfer_pressure)
+net_ev = adjusted_ev - transfer_penalty + LAMBDA_TRANSFER * next_stage_ev
+```
+
+Intent shapes EV for all three core heuristics:
+1. `win_priority` → stage winner picks
+2. `transfer_pressure` → transfer cost penalty
+3. `survival_priority` → sprinter survival risk (structural, not hard rule)
+
+**Sprinter survival** (structural signal, not a hard exclusion rule):
+```python
+if sprinter_survival_risk(rider, gc_state, stage_profile) == HIGH:
+    expected_stage_penalty = -0.8 * p_dnf_equivalent
+```
+
+**λ (transfer discount):**
+```python
+LAMBDA_TRANSFER = 0.85   # in config.py
+```
+- CLI: `--lambda 0.7` overrides default
+- λ is a strategy knob, not a model parameter
+- Do NOT tie λ to calibration metrics
+- Session 21+: candidate for volatility-based auto-adaptation
+
+**Captain scoring:**
+```python
+captain_value = (
+    2.0 * p_win +
+    1.2 * p_top15 +
+    intent.win_priority
+)
+```
+Replaces static `argmax(p_win)`. Encodes rule 2 (balance certainty vs spike).
+
+#### 18D — CLI
+
+```bash
+python3 main.py brief --stage 5
+python3 main.py brief --stage 5 --lookahead
+python3 main.py brief --stage 5 --override overrides/stage_5.json
+python3 main.py brief --stage 5 --lookahead --override overrides/stage_5.json --lambda 0.75
+```
+
+**Tests (+8 → ~448 passing):**
+```python
+def test_compute_stage_intent_flat_stage_high_win_priority()
+def test_compute_stage_intent_mountain_stage_high_survival()
+def test_apply_overrides_signal_crosswind_raises_breakaway()
+def test_apply_overrides_requires_reason_field()
+def test_net_ev_lambda_zero_equals_unadjusted_ev()        # key regression guard
+def test_intent_win_priority_scales_ev_correctly()
+def test_captain_selection_uses_intent_weight()
+def test_sprinter_penalty_applied_on_high_survival_risk()
+```
+
+`test_net_ev_lambda_zero_equals_unadjusted_ev` is the regression guard:
+λ=0 and win_priority=0 must reproduce previous single-stage EV exactly.
+
+**Done when:**
+- [ ] `compute_stage_intent()` correct for flat, mountain, ITT
+- [ ] Overrides rejected without `reason` field
+- [ ] Signal → intent delta map handles all 4 signals in table above
+- [ ] `net_ev` with λ=0, win_priority=0 matches pre-Session-18 EV (regression)
+- [ ] `--override` works end-to-end on a real stage
+- [ ] Captain output changes vs static `argmax(p_win)` on ≥1 real stage
+- [ ] 448+ tests passing
+- [ ] `SESSION_18_SUMMARY.md` created
+- [ ] This roadmap updated
+
+**Commit:** `Session 18: ICDL v1 — stage intent, signal overrides, transfer-aware EV, intent-weighted captain`
 
 ---
 
@@ -649,118 +793,65 @@ GC climber that pure single-stage ANCHOR would sell. That's the proof it works.
 - `scripts/calibrate.py` — reads `validation_log.md`, computes per-role Brier
   scores across all stages so far, suggests updated `ROLE_TOP15` values
 - Interactive confirmation: show current vs suggested, require explicit approval
-- Multi-stage Brier tracking: not just per-stage but rolling 5-stage window
+- Multi-stage Brier tracking: rolling 5-stage window
 - Scenario frequency tracking: predicted prior vs realized frequency per stage type
-- Update `SCENARIO_MULTIPLIERS` if realized frequencies diverge from priors
 - `calibration_history.json` — audit trail of all constant changes with Brier delta
 
 **Adjustment discipline:**
 Only adjust a constant if:
-1. It is wrong in the same direction for 3+ stages of the same type
-2. The Brier score improves after adjustment (verify on held-out stage)
+1. Wrong in same direction for 3+ stages of the same type
+2. Brier score improves after adjustment (verify on held-out stage)
 
-**Done when:** Brier score improves vs Session 17 baseline. At least one
-constant adjusted with documented before/after comparison.
+**Note:** Session 19 does NOT block Session 20. Run in parallel once
+5 stages of data are available.
 
 **Target: 458 tests passing (+10)**
 
 ---
 
-## Phase 2 — Model Quality (Sessions 20–22)
+## Phase 3 — Decision Optimization (Sessions 20–22)
 
-### Session 20 — Competitor Analysis + Differential Picks
-**After:** 5+ stages (ownership data meaningful by then)
-**Goal:** Know what the field is doing. Find structural edges.
+### Session 20 — Lookahead Optimizer v1
+**After:** Session 18 ICDL live + Session 17 engine validated
+**Goal:** Non-myopic decisions using intent-aware multi-stage EV
 
-**The core insight:** In a 50–100k player field, a rider owned by 40% of teams
-gives zero relative upside even if they win. You need picks others don't have.
-
-**Differential score:**
-```python
-differential = ev_rank - ownership_rank
-# Positive = underowned relative to EV → buy signal
-# Negative = overowned relative to EV → avoid or sell signal
-```
+**Now safe to build because:**
+- `net_ev` is already transfer-aware (Session 18)
+- `StageIntent` already encodes race context (Session 18)
+- Lookahead calls `evaluate_action_multistage()` using both
+- Math is simple because decision structure is already correct
 
 **What to build:**
-- `ingestion/competitors.py` — scrape top-100 teams from Holdet leaderboard
-- `ownership_pct` on `Rider` (from `popularity` endpoint — confirmed or add
-  manual input fallback)
-- Differential score computed for all riders after each ingest
-- `/brief` response includes `differential_picks`: top 5 riders by differential
-- Frontend: "Own%" and "Diff" columns in rider table
-- Briefing page: differential picks section highlighted separately from EV picks
+- `evaluate_action_multistage(state, action, stages, riders, probs, horizon=2)`
+- Stage N: full sim at current `n_sim`
+- Stage N+1: fast lookahead at n=200 (speed: 4 profiles × candidates × 2 stages < 10s)
+- Uses `StageIntent` for both stages — no blind EV rollup
+- Discount α = 0.85 (tune after 3+ stages; independent of λ)
+- Briefing output: "over 2 stages" framing shows why recommendation differs
 
-**Nuance (don't just use raw ownership):**
-Combine three signals:
-1. EV rank (model quality)
-2. Ownership rank (field behavior)
-3. Variance rank (upside potential — p95 rank)
-
-```python
-differential_score = (
-    0.5 * (ev_rank_pct)           # model says good
-    + 0.3 * (1 - ownership_pct)   # field undervalues them
-    + 0.2 * (p95_rank_pct)        # has upside
-)
-```
-
-**Done when:** Briefing shows differential picks that differ from raw EV picks
-on at least one real stage.
+**Done when:** BALANCED+lookahead produces different recommendation from
+BALANCED on ≥1 real stage, with documented reason.
 
 **Target: 468 tests passing (+10)**
 
 ---
 
 ### Session 21 — Optimizer Quality
-**After:** Session 19 (calibrated probs make this meaningful)
-**Goal:** Better squad discovery, faster evaluation.
+**Goal:** Faster, smarter optimization
 
-**Three improvements (in priority order):**
-
-**1. Shared simulation pool (highest priority — unlocks everything after)**
-All 4 profiles currently run independent `_eval_team` calls.
-Fix: run one set of 500 sims per squad, extract p10/EV/p80/p95 from the same
-distribution. Reduces optimizer cost by ~4×.
-
-```python
-def _eval_team_shared(squad, captain, stage, riders, probs, n, seed) -> TeamSimResult:
-    # run once, return full distribution
-    # profiles extract their metric from the same result
-```
-
-**2. Weighted double-swap sampling**
-Current `random.sample(eligible, 2)` misses strong synergy pairs.
-Fix: weight by `sim_results[r].percentile_95`:
-```python
-buy_pair = weighted_sample(eligible, weights=[sim[r].p95 for r in eligible], k=2)
-```
-
-**3. NOISE_FLOOR scaling**
-Current `NOISE_FLOOR = 20_000` is hardcoded for n=500.
-Fix: `NOISE_FLOOR = 450_000 / sqrt(n_sim)` — scales correctly if n_sim changes.
-
-**Done when:** Optimizer produces same or better squads in half the wall-clock time.
+**What to build:**
+- Shared simulation pool (avoid re-simulating same riders — ~4× speedup)
+- Double-swap weighting by p95
+- n_sim auto-scaling: bump to 2000 for final 5 stages
+- State backup to Supabase (⚠️ pull forward if Railway drops state.json even once)
+- λ volatility-based auto-adaptation (candidate)
 
 **Target: 476 tests passing (+8)**
 
 ---
 
-### Session 22 — Variance-Aware Profiles + Captain Selection
-**After:** Session 21 (shared sim pool required)
-**Goal:** Make risk profiles behave like actual strategies, not just metric selectors.
-
-**Current problem:** profiles only differ in which percentile they optimize.
-That's not how risk actually works in a large field.
-
-**What profiles should really optimize:**
-
-| Profile    | Behavior                          | Metric                          |
-|------------|-----------------------------------|---------------------------------|
-| ANCHOR     | Maximize floor, minimize blowups  | p10, minimize downside variance |
-| BALANCED   | Maximize mean EV                  | EV                              |
-| AGGRESSIVE | Maximize upside probability       | p80, maximize std_dev           |
-| ALL_IN     | Maximum ceiling, ignore floor     | p95, maximize p_positive        |
+### Session 22 — Variance-Aware Profiles + Captain System
+**Goal:** Real risk behavior encoded in profiles
 
 **What to build:**
 - `_team_metric()` gains variance term:
@@ -770,123 +861,79 @@ That's not how risk actually works in a large field.
   # AGGRESSIVE: reward variance
   metric = p80 + 0.1 * std_dev
   ```
-- Conditional captain selection (uses shared sim pool from Session 21):
-  For each candidate captain, evaluate which maximizes the profile metric
-  across the same simulation set. Not just individual p10/p95 — team-level impact.
-- Captain selection considers correlation: a rider whose good days align with
-  the team's good days (positive correlation) is better than one whose good days
-  are independent.
+- Captain evaluated inside team sim (shared pool from Session 21)
 - `captain_reasoning` field in `ProfileRecommendation`
-
-**Done when:** ANCHOR and ALL_IN recommend different captains on at least 3
-historical stages, with documented reasoning.
+- Note: simulation already encodes correlation implicitly — no explicit
+  correlation computation needed (80% of benefit, free)
 
 **Target: 486 tests passing (+10)**
 
 ---
 
-## Phase 3 — Strategy Layer (Sessions 23–24)
+## Phase 4 — Competitive Edge Layer (Sessions 23–25)
 
-### Session 23 — Intelligence Automation
-**After:** Stable full system (probabilities decent, UI clear)
-**Goal:** Claude autonomously researches news and odds, presents structured
-probability suggestions for user approval.
+### Session 23 — Intelligence Automation + Differential Picks
+**Goal:** Structured external signals + ownership-aware recommendations
 
-The "Gather Intelligence" button exists (Session 9). Upgrade it from free-text
-summary to a structured suggestion workflow.
+**Differential picks (biggest structural edge in 50–100k field):**
+```python
+differential_score = (
+    0.5 * ev_rank_pct           # model says good
+    + 0.3 * (1 - ownership_pct) # field undervalues them
+    + 0.2 * p95_rank_pct        # has upside
+)
+```
 
-**What to build:**
-- `api/intelligence.py` — structured prompt: fetch news + odds → output JSON
-  with suggested p_win / p_top15 adjustments per rider
-- Response format:
-  ```json
-  {
-    "suggestions": [
-      {
-        "rider_id": "...",
-        "rider_name": "Pogacar",
-        "field": "p_win",
-        "current": 0.18,
-        "suggested": 0.28,
-        "confidence": "HIGH",
-        "reason": "Bookmaker odds shortened from 4.5 to 3.2 overnight"
-      }
-    ]
-  }
-  ```
-- Frontend: "Apply suggestions" UI — shows each suggestion, user confirms or
-  overrides individually, accepted suggestions flow into `interactive_adjust`
-- Audit trail: log accepted vs rejected suggestions to `state.json`
-- Confidence levels: HIGH (odds movement + news), MEDIUM (one signal),
-  LOW (speculation only)
+**Intelligence automation:**
+- Upgrade "Gather Intelligence" from free-text to structured JSON suggestions
+- Auto-research pipeline outputs signal candidates for `overrides/stage_N.json`
+- User reviews + approves before brief runs
+- Audit trail: accepted vs rejected suggestions logged to `state.json`
 
-**Done when:** On a real stage, at least 2 intelligence suggestions are generated,
-reviewed, accepted, and flow through to a changed briefing output.
-
-**Target: 494 tests passing (+8)**
-
----
-
-### Session 24 — Hardening + Performance
-**After:** Mid-race (pull forward if Railway instability observed in week 1)
-**Goal:** Production-ready for the final week of the Giro.
-
-**What to build:**
-- **State persistence backup:** Supabase as authoritative state store, not just
-  display cache. If Railway loses `state.json`, restore from Supabase automatically.
-  This is the single biggest operational risk in the current system.
-- **n_sim auto-scaling:** bump to 2000 for final 5 stages (higher variance in GC,
-  more compute worth it — shared sim pool from Session 21 makes this feasible)
-- **Injury/elimination alerts:** push notification or email if any team rider
-  shows `isInjured=True` or `isEliminated=True` after ingest
-- **Mobile briefing view:** stage-day decisions happen on phone. Optimize the
-  briefing page for narrow viewport. 4-profile table must be readable on mobile.
-- **NOISE_FLOOR empirical tuning:** use actual std_dev from 10+ stages of real
-  simulation data to set this precisely.
-
-**⚠️ Pull this forward if:** Railway drops state.json even once during the race.
-State recovery is a blocking issue. Everything else in this session is optional.
-
-**Target: 502 tests passing (+8)**
-
----
-
-## Phase 4 — Final Edge (Session 25)
-
-### Session 25 — Scenario-Conditioned Insights + TdF Prep
-**After:** Final week of Giro
-**Goal:** Surface explainability, learn from the season, prepare for Tour de France.
-
-**Scenario-conditioned EV exposure (the missing piece):**
-Right now the model outputs a single EV per rider. Users don't know *why*.
-Expose `ev_by_scenario` in the API and frontend:
-
+**ev_by_scenario exposure (free — partition existing scenario_counts):**
 ```json
 {
   "rider": "Merlier",
   "ev_total": 82000,
   "ev_by_scenario": {
     "bunch_sprint": 195000,
-    "breakaway":    -12000,
-    "gc_day":       8000
+    "breakaway": -12000,
+    "gc_day": 8000
   }
 }
 ```
 
-This unlocks:
-- Smarter users: "I think it's a breakaway day → Merlier is a trap"
-- Explainability: users understand why the model recommends what it does
-- Trust: model is no longer a black box
+**Target: 494 tests passing (+8)**
 
-**Retrospective:**
-- `scripts/retrospective.py` — season summary: Brier scores by stage/role/scenario,
+---
+
+### Session 24 — Hardening + Performance
+**Goal:** Production-ready final week
+
+**What to build:**
+- State recovery from Supabase if Railway drops state.json
+- Injury/elimination alerts after ingest
+- Mobile briefing view
+- NOISE_FLOOR empirical tuning from 10+ stages of real data
+
+**⚠️ Pull forward if:** Railway drops state.json even once.
+
+**Target: 502 tests passing (+8)**
+
+---
+
+### Session 25 — Retrospective + TdF Switch
+**Goal:** Learn from the Giro, prepare for Tour de France
+
+**What to build:**
+- `scripts/retrospective.py` — Brier scores by stage/role/scenario,
   best/worst model calls, calibration drift over the race
-- Document what worked, what didn't, what to tune for TdF
-
-**TdF prep:**
 - Swap game ID and event ID to TdF values
 - Confirm all ingestion endpoints still work
 - Archive Giro state, fresh start
+
+**Done when:** `python3 main.py ingest --stage 1` against TdF game ID returns
+clean briefing.
 
 **Target: 510 tests passing (+8)**
 
@@ -894,34 +941,59 @@ This unlocks:
 
 ## Session summary
 
-| Session       | Status                    | Theme                          | Key unlock                        | Tests |
-|---------------|---------------------------|-------------------------------|-----------------------------------|-------|
-| 1             | ✓ complete                | Scoring engine                 | Core value calculation            | 59    |
-| 2             | ✓ complete (2026-04-17)   | Probability layer              | Model priors + manual adjust      | 84    |
-| 3             | ✓ complete                | Monte Carlo simulator          | Per-rider EV projections          | —     |
-| 4             | ✓ complete                | Optimizer + risk profiles      | 4-profile transfer recs           | —     |
-| 5             | ✓ complete (2026-04-17)   | API ingestion                  | Live rider data                   | 219   |
-| 6             | ✓ complete (2026-04-17)   | CLI orchestrator               | Full daily workflow               | 265   |
-| 7             | ✓ complete                | Reporting + Brier tracking     | Calibration data                  | —     |
-| 8             | ✓ complete                | Validation + odds inputs       | Engine confirmed + odds           | 310   |
-| 9             | ✓ complete (2026-04-19)   | Frontend (React + Supabase)    | Web interface live                | 316   |
-| 10            | ✓ complete (2026-04-19)   | FastAPI + Railway              | Any-device access                 | 341   |
-| 11            | ✓ complete (2026-04-20)   | Auto-login + validate          | No more manual cookie             | 361   |
-| 12            | ✓ complete (2026-04-20)   | Railway hardening              | Deployment stable                 | 361   |
-| 13            | ✓ complete (2026-04-22)   | UI fixes + briefing            | Usable on race day                | 363   |
-| 14            | ✓ complete (2026-04-22)   | Simulation layer rebuild       | Coherent stage outcomes           | —     |
-| 15            | ✓ complete (2026-04-22)   | Team-level optimizer           | Squad-level EV + role display     | 407   |
-| 15-Fixes      | ✓ complete (2026-04-22)   | Cache, threshold, role fixes   | Correctness + etapebonus diag     | 415   |
-| 16            | ✓ complete (2026-04-24)   | Scenario-aware simulation      | User scenario control             | 429   |
-| 17            | planned                   | Live validation + calibration  | Engine confirmed correct          | ~440  |
-| 18            | planned                   | Minimal lookahead              | Non-myopic decisions              | ~448  |
-| 19            | planned                   | Calibration pass               | Data-driven model constants       | ~458  |
-| 20            | planned                   | Competitor analysis            | Differential picks                | ~468  |
-| 21            | planned                   | Optimizer quality              | Shared sims, faster, smarter      | ~476  |
-| 22            | planned                   | Variance-aware profiles        | Real risk behavior + captain      | ~486  |
-| 23            | planned                   | Intelligence automation        | Auto probability suggestions      | ~494  |
-| 24            | planned                   | Hardening + performance        | Production-ready final week       | ~502  |
-| 25            | planned                   | Scenario insights + TdF prep   | Explainability + next race        | ~510  |
+| Session       | Status                    | Theme                                | Key unlock                           | Tests |
+|---------------|---------------------------|--------------------------------------|--------------------------------------|-------|
+| 1             | ✓ complete                | Scoring engine                       | Core value calculation               | 59    |
+| 2             | ✓ complete (2026-04-17)   | Probability layer                    | Model priors + manual adjust         | 84    |
+| 3             | ✓ complete                | Monte Carlo simulator                | Per-rider EV projections             | —     |
+| 4             | ✓ complete                | Optimizer + risk profiles            | 4-profile transfer recs              | —     |
+| 5             | ✓ complete (2026-04-17)   | API ingestion                        | Live rider data                      | 219   |
+| 6             | ✓ complete (2026-04-17)   | CLI orchestrator                     | Full daily workflow                  | 265   |
+| 7             | ✓ complete                | Reporting + Brier tracking           | Calibration data                     | —     |
+| 8             | ✓ complete                | Validation + odds inputs             | Engine confirmed + odds              | 310   |
+| 9             | ✓ complete (2026-04-19)   | Frontend (React + Supabase)          | Web interface live                   | 316   |
+| 10            | ✓ complete (2026-04-19)   | FastAPI + Railway                    | Any-device access                    | 341   |
+| 11            | ✓ complete (2026-04-20)   | Auto-login + validate                | No more manual cookie                | 361   |
+| 12            | ✓ complete (2026-04-20)   | Railway hardening                    | Deployment stable                    | 361   |
+| 13            | ✓ complete (2026-04-22)   | UI fixes + briefing                  | Usable on race day                   | 363   |
+| 14            | ✓ complete (2026-04-22)   | Simulation layer rebuild             | Coherent stage outcomes              | —     |
+| 15            | ✓ complete (2026-04-22)   | Team-level optimizer                 | Squad-level EV + role display        | 407   |
+| 15-Fixes      | ✓ complete (2026-04-22)   | Cache, threshold, role fixes         | Correctness + etapebonus diag        | 415   |
+| 16            | ✓ complete (2026-04-24)   | Scenario-aware simulation            | User scenario control                | 429   |
+| 17            | planned                   | Live validation + calibration        | Engine confirmed correct             | ~440  |
+| **18**        | **planned**               | **ICDL v1 — stage intent**           | **System understands race meaning**  | ~448  |
+| 19            | planned                   | Calibration pass                     | Data-driven model constants          | ~458  |
+| 20            | planned                   | Lookahead optimizer v1               | Non-myopic decisions (now safe)      | ~468  |
+| 21            | planned                   | Optimizer quality                    | Shared sims, faster, smarter         | ~476  |
+| 22            | planned                   | Variance-aware profiles + captain    | Real risk behavior                   | ~486  |
+| 23            | planned                   | Intelligence + differential picks    | Biggest competitive edge             | ~494  |
+| 24            | planned                   | Hardening + performance              | Production-ready final week          | ~502  |
+| 25            | planned                   | Retrospective + TdF prep             | Season learning, next race           | ~510  |
+
+---
+
+## Critical path
+
+**17 → 18 → 20** is the competitive critical path.
+
+Session 19 (calibration) does NOT block Session 20 (lookahead).
+Run 19 in parallel once 5 stages of data are available.
+
+---
+
+## Locked design decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| StageIntent source | Deterministic algorithm only | Reproducible, testable, no drift |
+| Override format | Event signals, not numeric field edits | Calibration stays meaningful |
+| Signal translation | `apply_intelligence_overrides()` owns all deltas | One place to audit |
+| λ (transfer weight) | Fixed 0.85, exposed as `--lambda` CLI flag | Strategy knob, not model parameter |
+| Session 18.5 | Absorbed into Session 18 as `--override` flag | No fragmentation |
+| Lookahead timing | Session 20 (after ICDL, not before) | Intent first, optimization second |
+| Captain logic | Intent-weighted: 2×p_win + 1.2×p_top15 + win_priority | Encodes rule 2 directly |
+| Sprinter penalty | Structural p_dnf_equivalent signal | Not a hard rule — brittle-proof |
+| Intent → EV | `ev * (1 + 0.3 * win_priority)` | All 3 heuristics intent-weighted |
 
 ---
 
@@ -929,24 +1001,25 @@ This unlocks:
 
 **Non-negotiable:**
 - ✅ Engine correctness (Session 17)
-- ✅ Lookahead (Session 18) — fixes myopia immediately
-- ✅ Reasonable calibration (Session 19) — good enough after 5 stages
-- ✅ Differential picks (Session 20) — biggest structural edge in large field
+- ✅ Stage intent + transfer awareness (Session 18) — fixes decision blindness
+- ✅ Lookahead (Session 20) — fixes myopia, now lands on correct foundation
+- ✅ Differential picks (Session 23) — biggest structural edge in large field
 
 **High edge:**
-- 🔥 Ownership + EV mismatch (Session 20)
-- 🔥 Scenario awareness (already live from Session 16)
+- 🔥 Ownership + EV mismatch (Session 23)
+- 🔥 Scenario-conditioned EV / ev_by_scenario (Session 23)
 - 🔥 Variance-aware profiles (Session 22)
+- 🔥 Intelligence signal overrides (Session 18, `--override` flag)
 
 **Nice-to-have:**
-- Intelligence automation (Session 23)
 - Perfect calibration
+- Fully automated intelligence
 - Fancy UI
 
 **Biggest risks:**
-1. Over-tuning after Stage 1 (chase noise → worse model)
-2. Delaying lookahead (play like everyone else for the first week)
-3. Ignoring variance (mean EV is not how you win 50k-player fields)
+1. Railway drops state.json → pull Supabase backup to Session 21 if it happens once
+2. Over-tuning calibration too early → do not touch multipliers before 5 stages
+3. Holdet API changes between Giro and TdF → Session 25 endpoint revalidation
 
 ---
 
@@ -958,3 +1031,4 @@ This unlocks:
 4. End with all tests passing and state.json valid
 5. Commit to GitHub at end of each session
 6. If stuck after 3 attempts → stop, bring code + problem to Claude.ai
+
