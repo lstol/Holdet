@@ -10,7 +10,8 @@ coherent etapebonus, team bonus, and dynamic captain selection.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -19,7 +20,7 @@ from scoring.engine import (
     Rider, Stage, StageResult, score_rider,
     STAGE_POSITION_TABLE, TTT_PLACEMENT_TABLE,
 )
-from scoring.probabilities import RiderProb, RiderRole, _rider_type
+from scoring.probabilities import RiderProb, RiderRole, _rider_type, _rider_roles
 
 
 # ── Output schemas ─────────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ class TeamSimResult:
     percentile_95: float
     etapebonus_ev: float = 0.0   # mean etapebonus across simulations
     etapebonus_p95: float = 0.0  # 95th percentile etapebonus
+    scenario_stats: dict = field(default_factory=dict)  # realized scenario frequencies
 
 
 # ── Stage scenario definitions (A1) ───────────────────────────────────────────
@@ -108,17 +110,44 @@ SCENARIO_MULTIPLIERS: dict[str, dict[str, float]] = {
 _DOMESTIQUE_P15 = 0.02  # fallback for riders without a RiderProb entry
 
 
+# ── Scenario resolution helpers ───────────────────────────────────────────────
+
+def _normalize_scenarios(d: dict) -> dict:
+    """Normalise a scenario-weight dict so values sum to 1."""
+    s = sum(d.values())
+    return {k: v / s for k, v in d.items()} if s > 0 else d
+
+
+def _resolve_scenarios(stage: Stage, override: dict | None) -> dict:
+    """
+    Return normalised scenario weights for this stage type.
+    If override is provided, merge it on top of stage-type defaults.
+    Invalid keys raise ValueError.
+    """
+    base = dict(STAGE_SCENARIOS.get(stage.stage_type, [("gc_day", 1.0)]))
+
+    if override:
+        invalid = set(override) - set(base)
+        if invalid:
+            raise ValueError(
+                f"Invalid scenario keys for stage type '{stage.stage_type}': {invalid}"
+            )
+        merged = {**base, **override}
+        return _normalize_scenarios(merged)
+
+    return _normalize_scenarios(base)
+
+
 # ── Stage-level simulation helpers ────────────────────────────────────────────
 
-def _sample_scenario(stage_type: str, rng) -> str:
-    """Sample a race scenario for the given stage type."""
-    scenarios = STAGE_SCENARIOS.get(stage_type, [("gc_day", 1.0)])
-    if len(scenarios) == 1:
-        return scenarios[0][0]
-    probs = np.array([p for _, p in scenarios], dtype=float)
-    probs /= probs.sum()
-    idx = int(rng.choice(len(scenarios), p=probs))
-    return scenarios[idx][0]
+def _sample_scenario(scenarios: dict, rng) -> str:
+    """Sample a scenario from a normalised weights dict."""
+    keys = list(scenarios.keys())
+    weights = np.array([scenarios[k] for k in keys], dtype=float)
+    if len(keys) == 1:
+        return keys[0]
+    idx = int(rng.choice(len(keys), p=weights))
+    return keys[idx]
 
 
 def _build_weights(
@@ -127,12 +156,14 @@ def _build_weights(
     stage: Stage,
     scenario: str,
     dnf_mask: np.ndarray,
+    roles_map: dict | None = None,
 ) -> np.ndarray:
     """
     Compute Plackett-Luce weights for each rider.
-    Weight = p_top15 × scenario_multiplier[role], zero for DNF/DNS riders.
+    Weight = p_top15 × max(scenario_multiplier[role] for role in roles).
+    roles_map: pre-computed {holdet_id: [role, ...]} — avoids repeated _rider_roles() calls.
     """
-    mult_table = SCENARIO_MULTIPLIERS.get(scenario, SCENARIO_MULTIPLIERS["gc_day"])
+    mult_table = SCENARIO_MULTIPLIERS.get(scenario, SCENARIO_MULTIPLIERS.get("gc_day", {}))
     weights = np.empty(len(riders), dtype=float)
     for i, rider in enumerate(riders):
         if dnf_mask[i]:
@@ -140,8 +171,8 @@ def _build_weights(
             continue
         rp = probs.get(rider.holdet_id)
         base = rp.p_top15 if rp is not None else _DOMESTIQUE_P15
-        role = _rider_type(rider, stage)
-        mult = mult_table.get(role, 1.0)
+        roles = roles_map[rider.holdet_id] if roles_map else [_rider_type(rider, stage)]
+        mult = max((mult_table.get(role, 1.0) for role in roles), default=1.0)
         weights[i] = max(base * mult, 1e-8)
     return weights
 
@@ -192,18 +223,22 @@ def simulate_stage_outcome(
     riders: list[Rider],
     probs: dict[str, RiderProb],
     rng,
+    scenario: str | None = None,
+    roles_map: dict | None = None,
 ) -> StageResult:
     """
     Simulate one coherent stage outcome for the full rider field.
 
     Steps:
       1. Sample DNF riders from p_dnf per rider
-      2. Sample scenario (bunch_sprint / gc_day / breakaway / …)
-      3. Weight each rider by p_top15 × scenario multiplier
+      2. Sample scenario (bunch_sprint / gc_day / breakaway / …) — or use provided
+      3. Weight each rider by p_top15 × max scenario multiplier across roles
       4. Sample finish order via Plackett-Luce (Gumbel-max trick)
       5. Assign sprint/KOM points, jersey winners, GC standings
       6. Return StageResult — compatible with score_rider()
 
+    scenario  : pre-sampled scenario string from simulate_team(); if None, sample internally.
+    roles_map : pre-computed {holdet_id: [role, ...]} for multi-role weighting.
     finish_order is capped at top-30 for performance (sufficient for
     etapebonus top-15 and team-bonus top-3 lookups).
     """
@@ -226,8 +261,10 @@ def simulate_stage_outcome(
     dns_list = [rider_ids[i] for i in range(n) if riders[i].status == "dns"]
 
     # Step 2-4: Scenario → weights → Plackett-Luce finish order
-    scenario = _sample_scenario(stage.stage_type, rng)
-    weights = _build_weights(riders, probs, stage, scenario, dnf_mask)
+    if scenario is None:
+        scenario_weights = _resolve_scenarios(stage, None)
+        scenario = _sample_scenario(scenario_weights, rng)
+    weights = _build_weights(riders, probs, stage, scenario, dnf_mask, roles_map)
     full_order = _plackett_luce(weights, rider_ids, rng)
     # Cap at top-30 for score_rider performance (etapebonus needs ≤15, team-bonus ≤3)
     finish_order = full_order[:30]
@@ -298,25 +335,27 @@ def simulate_team(
     n: int = 5_000,
     stages_remaining: int = 1,
     seed: Optional[int] = None,
+    scenario_priors: dict | None = None,
 ) -> TeamSimResult:
     """
     Stage-level team Monte Carlo simulation.
 
     For each of n simulations:
+      - A scenario is sampled once from scenario_priors (or stage-type defaults)
       - simulate_stage_outcome() generates a coherent finish order
       - All 8 team riders are scored against that result
       - Captain bonus applied to the best-performing rider dynamically
       - Etapebonus credited once (not once per rider)
 
-    Returns TeamSimResult with EV, p10, p50, p80, p95 at team level.
+    Returns TeamSimResult with EV, p10, p50, p80, p95 at team level + scenario_stats.
 
     Parameters
     ----------
-    team    : list of 8 holdet_ids
-    captain : pre-selected captain holdet_id (for reporting; captain bonus
-              is applied dynamically to the best performer each sim)
-    riders  : full rider field (needed for coherent stage simulation)
-    probs   : probability dict for full field
+    team             : list of 8 holdet_ids
+    captain          : pre-selected captain holdet_id
+    riders           : full rider field (needed for coherent stage simulation)
+    probs            : probability dict for full field
+    scenario_priors  : optional partial override of stage-type scenario weights
     """
     rng = np.random.default_rng(seed)
     rider_map = {r.holdet_id: r for r in riders}
@@ -329,8 +368,17 @@ def simulate_team(
     assert captain in (r.holdet_id for r in team_riders) or not team_riders, \
         f"captain {captain!r} must be in declared squad"
 
+    # Pre-compute roles once — deterministic for (rider, stage, probs) triple
+    roles_map = {r.holdet_id: _rider_roles(r, stage, probs) for r in riders}
+
+    # Resolve scenario weights once before loop
+    scenarios = _resolve_scenarios(stage, scenario_priors)
+    scenario_counts: dict[str, int] = defaultdict(int)
+
     for sim_i in range(n):
-        result = simulate_stage_outcome(stage, riders, probs, rng)
+        scenario = _sample_scenario(scenarios, rng)
+        scenario_counts[scenario] += 1
+        result = simulate_stage_outcome(stage, riders, probs, rng, scenario=scenario, roles_map=roles_map)
 
         sim_values: dict[str, float] = {}
         etabonus = 0
@@ -351,7 +399,7 @@ def simulate_team(
         totals[sim_i] = sum(sim_values.values()) + captain_bonus + etabonus
         etabonuses[sim_i] = etabonus
 
-    return TeamSimResult(
+    team_result = TeamSimResult(
         team_ids=list(team),
         captain_id=captain,
         expected_value=float(np.mean(totals)),
@@ -362,6 +410,8 @@ def simulate_team(
         etapebonus_ev=float(np.mean(etabonuses)),
         etapebonus_p95=float(np.percentile(etabonuses, 95)),
     )
+    team_result.scenario_stats = {k: v / n for k, v in scenario_counts.items()}
+    return team_result
 
 
 # ── Legacy per-rider simulation (kept for backward compatibility) ──────────────

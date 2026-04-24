@@ -33,8 +33,8 @@ from scoring.engine import (
     Rider, Stage, StageResult, SprintPoint, KOMPoint, score_rider,
 )
 from scoring.probabilities import generate_priors, save_probs, _rider_roles
-from scoring.simulator import simulate_all_riders, STAGE_SCENARIOS
-from scoring.optimizer import optimize_all_profiles, suggest_profile
+from scoring.simulator import simulate_all_riders, STAGE_SCENARIOS, _resolve_scenarios, simulate_team
+from scoring.optimizer import optimize_all_profiles, suggest_profile, RiskProfile
 from output.tracker import record_stage_accuracy, save_accuracy
 
 
@@ -198,6 +198,7 @@ class BriefRequest(BaseModel):
     stage: int
     look_ahead: int = 5       # used as stages_remaining for optimizer
     captain_override: Optional[str] = None  # holdet_id
+    scenario_priors: Optional[dict] = None  # partial override of stage-type scenario weights
 
 
 class TeamRequest(BaseModel):
@@ -361,6 +362,9 @@ def post_brief(req: BriefRequest) -> dict:
         all_sims[rid].expected_value for rid in my_team if rid in all_sims
     )
 
+    # Resolve scenario weights (normalized; used both for optimization and API response)
+    resolved_scenarios = _resolve_scenarios(stage, req.scenario_priors)
+
     # Optimize all 4 profiles
     recommendations = optimize_all_profiles(
         riders=riders,
@@ -372,6 +376,7 @@ def post_brief(req: BriefRequest) -> dict:
         rank=rank,
         total_participants=total,
         stages_remaining=stages_remaining,
+        scenario_priors=req.scenario_priors,
     )
 
     # Suggested profile
@@ -422,8 +427,11 @@ def post_brief(req: BriefRequest) -> dict:
         for rid in my_team if rid in all_sims
     ]
 
-    # Scenario priors for the stage (A8)
-    scenario_stats = {s: p for s, p in STAGE_SCENARIOS.get(stage.stage_type, [])}
+    # Extract scenario_stats from BALANCED profile's team_result (realized frequencies)
+    balanced_result = recommendations.get(RiskProfile.BALANCED)
+    realized_scenario_stats: dict = {}
+    if balanced_result and balanced_result.team_result:
+        realized_scenario_stats = balanced_result.team_result.scenario_stats
 
     resp: dict = {
         "stage_number": req.stage,
@@ -438,7 +446,8 @@ def post_brief(req: BriefRequest) -> dict:
         "profiles": _serialize_profiles(recommendations, rider_map),
         "team_sims": team_sims,
         "dns_alerts": dns_alerts,
-        "scenario_priors": scenario_stats,
+        "scenario_priors": {k: round(v, 4) for k, v in resolved_scenarios.items()},
+        "scenario_stats": {k: round(v, 4) for k, v in realized_scenario_stats.items()},
     }
     if not my_team:
         resp["team_note"] = "No team picked yet — showing best team to select from scratch."

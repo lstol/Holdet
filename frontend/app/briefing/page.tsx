@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient, Stage, Rider, ProbSnapshot, GameState, RiderAdjustment } from '@/lib/supabase'
 import { AlertTriangle, Zap, RefreshCw, Play, ChevronDown, ChevronUp } from 'lucide-react'
 
@@ -144,6 +144,8 @@ type BriefResult = {
   team_sims: TeamSim[]
   dns_alerts: { name: string; status: string }[]
   scenario_priors: Record<string, number> | null
+  scenario_stats: Record<string, number> | null
+  team_note: string | null
 }
 
 function parseJsonField(val: unknown): string[] {
@@ -187,6 +189,8 @@ export default function BriefingPage() {
   const [ingestMsg, setIngestMsg] = useState<string | null>(null)
   const [showProfiles, setShowProfiles] = useState(false)
   const [user, setUser] = useState<any>(null)
+  const [scenarioPriors, setScenarioPriors] = useState<Record<string, number> | null>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const stored = localStorage.getItem('holdet_briefing_result')
@@ -246,12 +250,34 @@ export default function BriefingPage() {
     }
   }, [])
 
-  const runBriefing = useCallback(async () => {
+  function normalizeScenario(
+    key: string,
+    newValue: number,
+    current: Record<string, number>
+  ): Record<string, number> {
+    const others = Object.keys(current).filter(k => k !== key)
+    const remaining = 100 - newValue
+    const sumOthers = others.reduce((s, k) => s + current[k], 0)
+    const updated: Record<string, number> = { ...current, [key]: newValue }
+    for (const k of others) {
+      updated[k] = sumOthers > 0
+        ? Math.round((current[k] / sumOthers) * remaining)
+        : Math.round(remaining / others.length)
+    }
+    return updated
+  }
+
+  const runBriefing = useCallback(async (priorsOverride?: Record<string, number> | null) => {
     if (!stage) return
     setBriefLoading(true)
     setBriefError(null)
     setBriefResult(null)
     try {
+      const priors = priorsOverride ?? scenarioPriors
+      // Convert percentages to fractions for the API, omit if null
+      const scenarioPriorsPayload = priors
+        ? Object.fromEntries(Object.entries(priors).map(([k, v]) => [k, v / 100]))
+        : null
       const res = await fetch(`${API}/brief`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -259,11 +285,20 @@ export default function BriefingPage() {
           stage: stage.number,
           look_ahead: lookAhead,
           captain_override: captainOverride || null,
+          scenario_priors: scenarioPriorsPayload,
         }),
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.detail ?? 'Brief failed')
       setBriefResult(d)
+      // Initialize slider state from resolved priors returned by API
+      if (d.scenario_priors && !priors) {
+        const pct = Object.fromEntries(
+          Object.entries(d.scenario_priors as Record<string, number>)
+            .map(([k, v]) => [k, Math.round(v * 100)])
+        )
+        setScenarioPriors(pct)
+      }
       localStorage.setItem('holdet_briefing_result', JSON.stringify(d))
       setShowProfiles(true)
     } catch (e: unknown) {
@@ -271,7 +306,7 @@ export default function BriefingPage() {
     } finally {
       setBriefLoading(false)
     }
-  }, [stage, lookAhead, captainOverride])
+  }, [stage, lookAhead, captainOverride, scenarioPriors])
 
   const gatherIntelligence = useCallback(async () => {
     if (!stage || !gs) return
@@ -434,12 +469,45 @@ export default function BriefingPage() {
               ))}
             </select>
           </div>
-          <button onClick={runBriefing} disabled={briefLoading}
+          <button onClick={() => runBriefing()} disabled={briefLoading}
             className="flex items-center gap-2 px-4 py-1.5 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
             <Play size={14} />
             {briefLoading ? 'Running…' : 'Run Briefing'}
           </button>
         </div>
+
+        {/* Scenario sliders — shown once briefResult has initialized scenario_priors */}
+        {scenarioPriors && Object.keys(scenarioPriors).length > 0 && (
+          <div>
+            <p className="text-zinc-500 text-xs mb-2">Scenario priors (adjust to recompute)</p>
+            <div className="flex flex-wrap gap-4">
+              {Object.entries(scenarioPriors).map(([key, val]) => (
+                <div key={key} className="flex flex-col gap-1 min-w-[120px]">
+                  <div className="flex justify-between text-xs text-zinc-400">
+                    <label>{key.replace('_', ' ')}</label>
+                    <span className="tabular-nums">{val}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={val}
+                    onChange={e => {
+                      const newVal = Number(e.target.value)
+                      const updated = normalizeScenario(key, newVal, scenarioPriors)
+                      setScenarioPriors(updated)
+                      if (debounceRef.current) clearTimeout(debounceRef.current)
+                      debounceRef.current = setTimeout(() => {
+                        runBriefing(updated)
+                      }, 500)
+                    }}
+                    className="w-full accent-orange-500"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {briefError && (
           <p className="text-red-400 text-xs">{briefError}</p>
@@ -449,6 +517,14 @@ export default function BriefingPage() {
       {/* Briefing result — 4-profile table */}
       {briefResult && (
         <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-4">
+          {/* team_note banner — shown when no team is selected */}
+          {briefResult.team_note && (
+            <div className="bg-yellow-950 border border-yellow-700 rounded-lg p-3 flex items-start gap-2">
+              <AlertTriangle className="text-yellow-400 mt-0.5 shrink-0" size={16} />
+              <p className="text-yellow-300 text-sm">{briefResult.team_note}</p>
+            </div>
+          )}
+
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <h2 className="font-semibold text-white">
@@ -470,12 +546,24 @@ export default function BriefingPage() {
             <p className="text-zinc-500 text-xs italic">{briefResult.suggested_profile_reason}</p>
           )}
 
+          {/* Scenario priors + realized stats */}
           {briefResult.scenario_priors && Object.keys(briefResult.scenario_priors).length > 0 && (
-            <p className="text-zinc-500 text-xs">
-              {Object.entries(briefResult.scenario_priors)
-                .map(([s, p]) => `${s.charAt(0).toUpperCase() + s.slice(1).replace('_', ' ')} ${Math.round((p as number) * 100)}%`)
-                .join(' · ')}
-            </p>
+            <div className="text-xs text-zinc-500 space-y-0.5">
+              <p>
+                <span className="text-zinc-400">Priors:</span>{' '}
+                {Object.entries(briefResult.scenario_priors)
+                  .map(([s, p]) => `${s.replace('_', ' ')} ${Math.round((p as number) * 100)}%`)
+                  .join(' · ')}
+              </p>
+              {briefResult.scenario_stats && Object.keys(briefResult.scenario_stats).length > 0 && (
+                <p>
+                  <span className="text-zinc-400">Realized:</span>{' '}
+                  {Object.entries(briefResult.scenario_stats)
+                    .map(([s, p]) => `${s.replace('_', ' ')} ${Math.round((p as number) * 100)}%`)
+                    .join(' · ')}
+                </p>
+              )}
+            </div>
           )}
 
           {/* DNS alerts from briefing */}

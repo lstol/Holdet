@@ -1140,3 +1140,101 @@ class TestThresholdNoiseFloor:
             RiskProfile.ALL_IN, 60_000, 0, 0, 0, 1, current_metric=5_000_000
         )
         assert score_above is not None  # 60k > 50k threshold → accepted
+
+
+# ── Session 16: Transfer fix tests ───────────────────────────────────────────
+
+class TestDiffBasedTransferReporting:
+    """Verify diff-based transfer reporting: Stage 1 empty team and Stage 2+ semantics."""
+
+    def _make_pool(self):
+        """16-rider pool (8 GC + 8 sprinters) with realistic sim results."""
+        pool, ids, sr = _build_pool()
+        return pool, ids, sr
+
+    def test_stage1_empty_team_shows_8_buys_0_sells(self):
+        """With no prior team, all profiles report exactly 8 buys and 0 sells."""
+        import scoring.optimizer as opt_mod
+        opt_mod._eval_cache.clear()
+
+        pool, _, sr = self._make_pool()
+        stage = _flat_stage()
+
+        rec = optimize(
+            riders=pool,
+            my_team=[],
+            stage=stage,
+            probs={},
+            sim_results=sr,
+            bank=50_000_000,
+            risk_profile=RiskProfile.BALANCED,
+            rank=None,
+            total_participants=None,
+            stages_remaining=10,
+            n_sim=10,
+        )
+        buys  = [t for t in rec.transfers if t.action == "buy"]
+        sells = [t for t in rec.transfers if t.action == "sell"]
+        assert len(buys) == 8,  f"Expected 8 buys, got {len(buys)}: {[t.rider_name for t in buys]}"
+        assert len(sells) == 0, f"Expected 0 sells, got {len(sells)}: {[t.rider_name for t in sells]}"
+
+    def test_stage2_sells_reference_only_owned_riders(self):
+        """Sell actions must only reference riders that were in my_team."""
+        import scoring.optimizer as opt_mod
+        opt_mod._eval_cache.clear()
+
+        pool, my_team_ids, sr = self._make_pool()
+        stage = _flat_stage()
+
+        rec = optimize(
+            riders=pool,
+            my_team=my_team_ids,  # 8 GC riders
+            stage=stage,
+            probs={},
+            sim_results=sr,
+            bank=50_000_000,
+            risk_profile=RiskProfile.ALL_IN,
+            rank=None,
+            total_participants=None,
+            stages_remaining=10,
+            n_sim=10,
+        )
+        for t in rec.transfers:
+            if t.action == "sell":
+                assert t.rider_id in my_team_ids, (
+                    f"Sell references {t.rider_id!r} which was not in my_team"
+                )
+
+    def test_net_squad_always_8(self):
+        """After applying all transfers, the active squad is always exactly 8 riders."""
+        import scoring.optimizer as opt_mod
+        opt_mod._eval_cache.clear()
+
+        pool, my_team_ids, sr = self._make_pool()
+        stage = _flat_stage()
+
+        for profile in RiskProfile:
+            opt_mod._eval_cache.clear()
+            rec = optimize(
+                riders=pool,
+                my_team=my_team_ids,
+                stage=stage,
+                probs={},
+                sim_results=sr,
+                bank=50_000_000,
+                risk_profile=profile,
+                rank=None,
+                total_participants=None,
+                stages_remaining=10,
+                n_sim=10,
+            )
+            final = set(my_team_ids)
+            for t in rec.transfers:
+                if t.action == "sell":
+                    final.discard(t.rider_id)
+                elif t.action == "buy":
+                    final.add(t.rider_id)
+            assert len(final) == 8, (
+                f"Profile {profile.value}: expected 8 riders after transfers, "
+                f"got {len(final)}: {sorted(final)}"
+            )

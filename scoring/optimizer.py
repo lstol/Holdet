@@ -100,6 +100,7 @@ def _eval_team(
     probs: dict,
     n: int = 500,
     seed: int = 42,
+    scenario_priors: Optional[dict] = None,
 ) -> TeamSimResult:
     """Evaluate a squad via team Monte Carlo simulation, with memoization."""
     key = (tuple(sorted(squad_ids)), captain_id)  # sort enforced here — caller order doesn't matter
@@ -112,6 +113,7 @@ def _eval_team(
             probs=probs,
             n=n,
             seed=seed,
+            scenario_priors=scenario_priors,
         )
     return _eval_cache[key]
 
@@ -180,6 +182,7 @@ def _try_double_swaps(
     remaining_budget: float,
     n: int = 500,
     n_attempts: int = 20,
+    scenario_priors: Optional[dict] = None,
 ) -> Optional[tuple]:
     """
     Random double-swap exploration after greedy convergence (A5).
@@ -224,7 +227,7 @@ def _try_double_swaps(
 
         proposed_t = tuple(sorted(proposed))
         proposed_captain = _pick_captain(proposed, sim_results, profile, rider_map)
-        result = _eval_team(proposed_t, proposed_captain, stage, all_riders, probs, n=n, seed=42)
+        result = _eval_team(proposed_t, proposed_captain, stage, all_riders, probs, n=n, seed=42, scenario_priors=scenario_priors)
         if _team_metric(result, profile) > current_metric + threshold:
             return (proposed, proposed_captain, sell_pair, buy_pair)
 
@@ -356,6 +359,7 @@ def optimize(
     total_participants: Optional[int],
     stages_remaining: int,
     n_sim: int = 500,
+    scenario_priors: Optional[dict] = None,
 ) -> ProfileRecommendation:
     """
     Find the optimal squad for the given risk profile.
@@ -405,6 +409,10 @@ def optimize(
         elif rid in eligible:
             active_squad.append(rid)
 
+    # Snapshot state after forced sells — used for diff-based transfer reporting.
+    input_squad: list = list(active_squad)
+    forced_sell_transfers: list = list(transfers)
+
     # ── Step 2: fill squad to 8 ──────────────────────────────────────────────
     if len(active_squad) < 8:
         team_counts = _count_teams(active_squad, rider_map)
@@ -450,14 +458,6 @@ def optimize(
                 already_in.add(buy_id)
                 remaining_budget -= cost
                 team_counts[buy_rider.team_abbr] = team_counts.get(buy_rider.team_abbr, 0) + 1
-                transfers.append(TransferAction(
-                    action="buy",
-                    rider_id=buy_id,
-                    rider_name=buy_rider.name,
-                    value=buy_rider.value,
-                    fee=fee,
-                    reasoning="Fill squad slot",
-                ))
 
         _fill_from(
             sorted(
@@ -481,6 +481,7 @@ def optimize(
     current_captain = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
     current_result = _eval_team(
         tuple(sorted(active_squad)), current_captain, stage, riders, probs, n=n_sim, seed=42,
+        scenario_priors=scenario_priors,
     )
     current_metric = _team_metric(current_result, risk_profile)
 
@@ -521,6 +522,7 @@ def optimize(
                 proposed_captain = _pick_captain(list(proposed), sim_results, risk_profile, rider_map)
                 proposed_result = _eval_team(
                     proposed, proposed_captain, stage, riders, probs, n=n_sim, seed=42,
+                    scenario_priors=scenario_priors,
                 )
                 gain = _team_metric(proposed_result, risk_profile) - current_metric
 
@@ -551,28 +553,10 @@ def optimize(
         active_squad.remove(sell_id)
         active_squad.append(buy_id)
 
-        transfers.extend([
-            TransferAction(
-                action="sell",
-                rider_id=sell_id,
-                rider_name=sell_rider.name,
-                value=sell_rider.value,
-                fee=0,
-                reasoning=f"Sold to improve {risk_profile.value} metric",
-            ),
-            TransferAction(
-                action="buy",
-                rider_id=buy_id,
-                rider_name=buy_rider.name,
-                value=buy_rider.value,
-                fee=fee,
-                reasoning=f"{risk_profile.value} metric gain {best_score:,.0f}",
-            ),
-        ])
-
         current_captain = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
         current_result = _eval_team(
             tuple(sorted(active_squad)), current_captain, stage, riders, probs, n=n_sim, seed=42,
+            scenario_priors=scenario_priors,
         )
         current_metric = _team_metric(current_result, risk_profile)
 
@@ -590,6 +574,7 @@ def optimize(
         sim_results=sim_results,
         remaining_budget=remaining_budget,
         n=n_sim,
+        scenario_priors=scenario_priors,
     )
     if double_result is not None:
         proposed_squad, proposed_captain, sell_pair, buy_pair = double_result
@@ -599,28 +584,11 @@ def optimize(
             fee = _buy_fee(buy_rider.value)
             remaining_budget += sell_rider.value
             remaining_budget -= buy_rider.value + fee
-            transfers.extend([
-                TransferAction(
-                    action="sell",
-                    rider_id=s,
-                    rider_name=sell_rider.name,
-                    value=sell_rider.value,
-                    fee=0,
-                    reasoning=f"Double-swap: sold to improve {risk_profile.value}",
-                ),
-                TransferAction(
-                    action="buy",
-                    rider_id=b,
-                    rider_name=buy_rider.name,
-                    value=buy_rider.value,
-                    fee=fee,
-                    reasoning=f"Double-swap: bought to improve {risk_profile.value}",
-                ),
-            ])
         active_squad = proposed_squad
         current_captain = proposed_captain
         current_result = _eval_team(
             tuple(sorted(active_squad)), current_captain, stage, riders, probs, n=n_sim, seed=42,
+            scenario_priors=scenario_priors,
         )
 
     # ── Fallback: last-resort fill if still < 8 ──────────────────────────────
@@ -643,14 +611,6 @@ def optimize(
             active_squad.append(buy_id)
             remaining_budget -= buy_rider.value + fee
             fb_team_counts[buy_rider.team_abbr] = fb_team_counts.get(buy_rider.team_abbr, 0) + 1
-            transfers.append(TransferAction(
-                action="buy",
-                rider_id=buy_id,
-                rider_name=buy_rider.name,
-                value=buy_rider.value,
-                fee=fee,
-                reasoning="Last-resort fill: cheapest eligible rider",
-            ))
 
     if len(active_squad) < 8:
         logging.warning("Emergency fill triggered — could not reach 8 riders normally")
@@ -668,19 +628,42 @@ def optimize(
                 break
             active_squad.append(rid)
             em_team_counts[r.team_abbr] = em_team_counts.get(r.team_abbr, 0) + 1
-            transfers.append(TransferAction(
-                action="buy",
-                rider_id=rid,
-                rider_name=r.name,
-                value=r.value,
-                fee=0,
-                reasoning="Emergency fill: ignoring fee constraint",
-            ))
         if len(active_squad) < 8:
             logging.warning(
                 "optimizer: could only fill %d/8 slots — insufficient eligible riders",
                 len(active_squad),
             )
+
+    # ── Diff-based transfer reporting ────────────────────────────────────────
+    # Compute what was sold/bought relative to input_squad (state after forced sells).
+    # This prevents phantom sells of riders the user never owned (Stage 1 scenario).
+    sold_ids = [rid for rid in input_squad if rid not in active_squad]
+    bought_ids = [rid for rid in active_squad if rid not in input_squad]
+
+    optimization_transfers: list = []
+    for sid in sold_ids:
+        r = rider_map[sid]
+        optimization_transfers.append(TransferAction(
+            action="sell",
+            rider_id=sid,
+            rider_name=r.name,
+            value=r.value,
+            fee=0,
+            reasoning="Optimization swap",
+        ))
+    for bid in bought_ids:
+        r = rider_map[bid]
+        fee = _buy_fee(r.value)
+        optimization_transfers.append(TransferAction(
+            action="buy",
+            rider_id=bid,
+            rider_name=r.name,
+            value=r.value,
+            fee=fee,
+            reasoning="Optimization swap",
+        ))
+
+    transfers = forced_sell_transfers + optimization_transfers
 
     # ── Step 6: captain + final team result (A7) ─────────────────────────────
     captain_id = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
@@ -688,6 +671,7 @@ def optimize(
     # Final team result — n_sim sims with fixed seed for the accepted squad
     team_result = _eval_team(
         tuple(sorted(active_squad)), captain_id, stage, riders, probs, n=n_sim, seed=42,
+        scenario_priors=scenario_priors,
     )
 
     # Legacy per-rider aggregate metrics (kept for backward compatibility)
@@ -729,6 +713,7 @@ def optimize_all_profiles(
     total_participants: Optional[int],
     stages_remaining: int,
     n_sim: int = 500,
+    scenario_priors: Optional[dict] = None,
 ) -> dict:
     """Run all 4 profiles in one pass. Returns dict[RiskProfile, ProfileRecommendation]."""
     return {
@@ -744,6 +729,7 @@ def optimize_all_profiles(
             total_participants=total_participants,
             stages_remaining=stages_remaining,
             n_sim=n_sim,
+            scenario_priors=scenario_priors,
         )
         for profile in RiskProfile
     }

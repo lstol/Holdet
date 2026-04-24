@@ -1125,3 +1125,165 @@ class TestEtapebonusDiagnostics:
         assert result.etapebonus_p95 >= result.etapebonus_ev, (
             f"etapebonus_p95={result.etapebonus_p95} < etapebonus_ev={result.etapebonus_ev}"
         )
+
+
+# ── Session 16: Scenario override tests ──────────────────────────────────────
+
+def make_hilly_stage():
+    return Stage(
+        number=5,
+        race="test_race",
+        stage_type="hilly",
+        distance_km=180.0,
+        is_ttt=False,
+        start_location="X",
+        finish_location="Y",
+        sprint_points=[],
+        kom_points=[],
+    )
+
+
+class TestScenarioResolution:
+    """_resolve_scenarios and _normalize_scenarios"""
+
+    def test_normalize_sums_to_one(self):
+        from scoring.simulator import _normalize_scenarios
+        d = _normalize_scenarios({"a": 2.0, "b": 3.0})
+        assert abs(sum(d.values()) - 1.0) < 1e-9
+
+    def test_normalize_preserves_ratios(self):
+        from scoring.simulator import _normalize_scenarios
+        d = _normalize_scenarios({"a": 1.0, "b": 3.0})
+        assert abs(d["b"] / d["a"] - 3.0) < 1e-9
+
+    def test_resolve_returns_normalized_defaults(self):
+        from scoring.simulator import _resolve_scenarios
+        stage = make_flat_stage()
+        resolved = _resolve_scenarios(stage, None)
+        assert abs(sum(resolved.values()) - 1.0) < 1e-9
+
+    def test_override_replaces_default(self):
+        from scoring.simulator import _resolve_scenarios
+        stage = make_flat_stage()
+        resolved = _resolve_scenarios(stage, {"breakaway": 0.90})
+        assert resolved["breakaway"] > resolved["bunch_sprint"]
+
+    def test_override_still_sums_to_one(self):
+        from scoring.simulator import _resolve_scenarios
+        stage = make_flat_stage()
+        resolved = _resolve_scenarios(stage, {"breakaway": 0.50})
+        assert abs(sum(resolved.values()) - 1.0) < 1e-9
+
+    def test_invalid_key_raises(self):
+        from scoring.simulator import _resolve_scenarios
+        with pytest.raises(ValueError, match="Invalid scenario keys"):
+            _resolve_scenarios(make_flat_stage(), {"unknown_scenario": 0.5})
+
+
+class TestScenarioStats:
+    """TeamSimResult.scenario_stats populated correctly."""
+
+    def _make_team_fixture(self):
+        riders = [
+            make_rider(holdet_id=f"r{i}", team_abbr=f"T{i}", value=8_000_000)
+            for i in range(1, 9)
+        ]
+        stage = make_flat_stage()
+        probs = {
+            r.holdet_id: make_probs(rider_id=r.holdet_id)
+            for r in riders
+        }
+        return riders, stage, probs
+
+    def test_scenario_stats_sum_to_one(self):
+        riders, stage, probs = self._make_team_fixture()
+        result = simulate_team(
+            team=[r.holdet_id for r in riders],
+            captain=riders[0].holdet_id,
+            stage=stage, riders=riders, probs=probs, n=200, seed=42,
+        )
+        assert abs(sum(result.scenario_stats.values()) - 1.0) < 0.01
+
+    def test_scenario_stats_keys_match_stage_type(self):
+        from scoring.simulator import STAGE_SCENARIOS
+        riders, stage, probs = self._make_team_fixture()
+        result = simulate_team(
+            team=[r.holdet_id for r in riders],
+            captain=riders[0].holdet_id,
+            stage=stage, riders=riders, probs=probs, n=200, seed=42,
+        )
+        expected_keys = {s for s, _ in STAGE_SCENARIOS["flat"]}
+        assert set(result.scenario_stats.keys()) == expected_keys
+
+    def test_scenario_stats_reflect_override(self):
+        # override breakaway=0.90 on flat (base: bunch_sprint=0.65, reduced=0.20, breakaway=0.15)
+        # merged sum = 1.75, so resolved breakaway ≈ 0.514 — well above default ~0.086
+        riders, stage, probs = self._make_team_fixture()
+        result = simulate_team(
+            team=[r.holdet_id for r in riders],
+            captain=riders[0].holdet_id,
+            stage=stage, riders=riders, probs=probs, n=500, seed=42,
+            scenario_priors={"breakaway": 0.90},
+        )
+        # Resolved breakaway ≈ 0.514 — should be clearly above default ~0.086
+        assert result.scenario_stats["breakaway"] > 0.40
+
+    def test_simulate_team_accepts_scenario_priors(self):
+        riders, stage, probs = self._make_team_fixture()
+        result = simulate_team(
+            team=[r.holdet_id for r in riders],
+            captain=riders[0].holdet_id,
+            stage=stage, riders=riders, probs=probs, n=50, seed=1,
+            scenario_priors={"bunch_sprint": 0.80},
+        )
+        assert isinstance(result, TeamSimResult)
+
+
+class TestScenarioPipelineEffect:
+    """F6: breakaway prior increases breakaway rider EV end-to-end."""
+
+    def test_breakaway_prior_increases_breakaway_rider_ev(self):
+        """
+        A clear breakaway specialist should get higher team EV when
+        breakaway prior is high vs low on a hilly stage.
+        """
+        stage = make_hilly_stage()
+
+        # One breakaway rider (low GC, low value — classified as BREAKAWAY)
+        breakaway_rider = make_rider(
+            holdet_id="BR1", value=6_000_000, gc_position=None,
+            team_abbr="BKW", name="Break Away",
+        )
+        # Fill with 7 riders from different teams
+        others = [
+            make_rider(holdet_id=f"O{i}", value=8_000_000, gc_position=i + 1,
+                       team_abbr=f"GC{i}", name=f"GC Rider {i}")
+            for i in range(1, 8)
+        ]
+        all_riders = [breakaway_rider] + others
+
+        probs = {
+            "BR1": make_probs(rider_id="BR1", p_win=0.05, p_top3=0.10, p_top10=0.20, p_top15=0.30),
+        }
+        for r in others:
+            probs[r.holdet_id] = make_probs(
+                rider_id=r.holdet_id, p_win=0.05, p_top3=0.12, p_top10=0.25, p_top15=0.40,
+            )
+
+        team = ["BR1"] + [r.holdet_id for r in others]
+
+        result_low = simulate_team(
+            team=team, captain="BR1", stage=stage,
+            riders=all_riders, probs=probs, n=500, seed=42,
+            scenario_priors={"breakaway": 0.05},
+        )
+        result_high = simulate_team(
+            team=team, captain="BR1", stage=stage,
+            riders=all_riders, probs=probs, n=500, seed=42,
+            scenario_priors={"breakaway": 0.75},
+        )
+
+        assert result_high.expected_value > result_low.expected_value, (
+            f"High breakaway EV {result_high.expected_value:.0f} should exceed "
+            f"low breakaway EV {result_low.expected_value:.0f}"
+        )
