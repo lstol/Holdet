@@ -35,6 +35,7 @@ from scoring.engine import (
 from scoring.probabilities import generate_priors, save_probs, _rider_roles
 from scoring.simulator import simulate_all_riders, STAGE_SCENARIOS, _resolve_scenarios, simulate_team
 from scoring.optimizer import optimize_all_profiles, suggest_profile, RiskProfile
+from scoring.stage_intent import StageIntent, compute_stage_intent, apply_intelligence_signals
 from output.tracker import record_stage_accuracy, save_accuracy
 
 
@@ -199,6 +200,9 @@ class BriefRequest(BaseModel):
     look_ahead: int = 5       # used as stages_remaining for optimizer
     captain_override: Optional[str] = None  # holdet_id
     scenario_priors: Optional[dict] = None  # partial override of stage-type scenario weights
+    intelligence_signals: Optional[dict] = None   # {"crosswind_risk": "high", ...}
+    intelligence_reason: Optional[str] = None
+    next_stage_type: Optional[str] = None         # reserved for Session 20
 
 
 class TeamRequest(BaseModel):
@@ -347,6 +351,18 @@ def post_brief(req: BriefRequest) -> dict:
     # Model probs (no interactive adjustment)
     probs = generate_priors(riders, stage)
 
+    # Compute stage intent
+    gc_positions_raw = state.get("gc_standings", {})
+    if isinstance(gc_positions_raw, list):
+        gc_positions = {rid: idx + 1 for idx, rid in enumerate(gc_positions_raw)}
+    else:
+        gc_positions = gc_positions_raw if isinstance(gc_positions_raw, dict) else {}
+    intent = compute_stage_intent(stage, gc_positions, next_stage=None, riders=riders)
+    if req.intelligence_signals:
+        if not req.intelligence_reason:
+            raise HTTPException(status_code=400, detail="intelligence_reason required when signals provided")
+        intent = apply_intelligence_signals(intent, req.intelligence_signals)
+
     # Simulate full field for optimizer
     all_sims = simulate_all_riders(
         riders=riders,
@@ -377,6 +393,7 @@ def post_brief(req: BriefRequest) -> dict:
         total_participants=total,
         stages_remaining=stages_remaining,
         scenario_priors=req.scenario_priors,
+        intent=intent,
     )
 
     # Suggested profile
@@ -448,6 +465,13 @@ def post_brief(req: BriefRequest) -> dict:
         "dns_alerts": dns_alerts,
         "scenario_priors": {k: round(v, 4) for k, v in resolved_scenarios.items()},
         "scenario_stats": {k: round(v, 4) for k, v in realized_scenario_stats.items()},
+        "stage_intent": {
+            "win_priority": intent.win_priority,
+            "survival_priority": intent.survival_priority,
+            "transfer_pressure": intent.transfer_pressure,
+            "team_bonus_value": intent.team_bonus_value,
+            "breakaway_likelihood": intent.breakaway_likelihood,
+        },
     }
     if not my_team:
         resp["team_note"] = "No team picked yet — showing best team to select from scratch."

@@ -60,3 +60,8 @@ def get_stages_path() -> str:
 
 TOTAL_STAGES = 21
 INITIAL_BUDGET = 50_000_000
+
+# Transfer discount factor — strategy knob, not a model parameter.
+# λ=0.85 means next-stage EV is discounted 15% relative to current stage.
+# Overridable via --lambda CLI flag. Do NOT tie to calibration metrics.
+LAMBDA_TRANSFER: float = 0.85

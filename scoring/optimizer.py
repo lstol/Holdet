@@ -17,9 +17,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from config import LAMBDA_TRANSFER
 from scoring.engine import Rider, Stage
 from scoring.probabilities import RiderProb
 from scoring.simulator import SimResult, TeamSimResult, simulate_team
+from scoring.stage_intent import StageIntent, compute_stage_intent, apply_intelligence_signals
 
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
@@ -64,6 +66,24 @@ _eval_cache: dict = {}
 # Prevents accepting random simulation noise as a meaningful gain.
 # Tune after Giro validation data is available.
 NOISE_FLOOR = 20_000
+
+
+# ── Intent utility functions (Session 18) ────────────────────────────────────
+# These exist for CLI display and future wiring in Session 20.
+# NOT currently wired into _eval_team().
+
+def apply_intent_to_ev(base_ev: float, intent: StageIntent) -> float:
+    """Scale EV by stage intent. win_priority boosts expected stage winners."""
+    return base_ev * (1.0 + 0.3 * intent.win_priority)
+
+
+def compute_transfer_penalty(fee: int, intent: StageIntent) -> float:
+    """
+    Scale transfer fee by intent.transfer_pressure.
+    High pressure = transfer cost weighted more heavily in decision.
+    Returns the adjusted penalty (always >= fee).
+    """
+    return fee * (1.0 + intent.transfer_pressure)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -183,6 +203,7 @@ def _try_double_swaps(
     n: int = 500,
     n_attempts: int = 20,
     scenario_priors: Optional[dict] = None,
+    intent: Optional[StageIntent] = None,
 ) -> Optional[tuple]:
     """
     Random double-swap exploration after greedy convergence (A5).
@@ -226,7 +247,7 @@ def _try_double_swaps(
             continue
 
         proposed_t = tuple(sorted(proposed))
-        proposed_captain = _pick_captain(proposed, sim_results, profile, rider_map)
+        proposed_captain = _pick_captain(proposed, sim_results, profile, rider_map, intent=intent)
         result = _eval_team(proposed_t, proposed_captain, stage, all_riders, probs, n=n, seed=42, scenario_priors=scenario_priors)
         if _team_metric(result, profile) > current_metric + threshold:
             return (proposed, proposed_captain, sell_pair, buy_pair)
@@ -290,6 +311,7 @@ def _pick_captain(
     sim_results: dict,
     profile: RiskProfile,
     rider_map: dict,
+    intent: Optional[StageIntent] = None,
 ) -> str:
     """Select captain per profile rules using per-rider SimResult."""
     eligible_ids = [rid for rid in squad_ids if rid in sim_results]
@@ -300,7 +322,10 @@ def _pick_captain(
         return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_10)
 
     elif profile == RiskProfile.BALANCED:
-        return max(eligible_ids, key=lambda rid: sim_results[rid].expected_value)
+        def balanced_score(rid):
+            s = sim_results[rid]
+            return s.expected_value + (intent.win_priority * s.percentile_95 * 0.1 if intent else 0)
+        return max(eligible_ids, key=balanced_score)
 
     elif profile == RiskProfile.AGGRESSIVE:
         return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_95)
@@ -360,6 +385,8 @@ def optimize(
     stages_remaining: int,
     n_sim: int = 500,
     scenario_priors: Optional[dict] = None,
+    intent: Optional[StageIntent] = None,
+    next_stage: Optional[Stage] = None,
 ) -> ProfileRecommendation:
     """
     Find the optimal squad for the given risk profile.
@@ -478,7 +505,7 @@ def optimize(
     candidates = _build_candidates(eligible, sim_results)
 
     # ── Step 4: greedy swap — team-level (A4) ────────────────────────────────
-    current_captain = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
+    current_captain = _pick_captain(active_squad, sim_results, risk_profile, rider_map, intent=intent)
     current_result = _eval_team(
         tuple(sorted(active_squad)), current_captain, stage, riders, probs, n=n_sim, seed=42,
         scenario_priors=scenario_priors,
@@ -519,7 +546,7 @@ def optimize(
                 proposed = tuple(sorted(
                     [buy_id if r == sell_id else r for r in active_squad]
                 ))
-                proposed_captain = _pick_captain(list(proposed), sim_results, risk_profile, rider_map)
+                proposed_captain = _pick_captain(list(proposed), sim_results, risk_profile, rider_map, intent=intent)
                 proposed_result = _eval_team(
                     proposed, proposed_captain, stage, riders, probs, n=n_sim, seed=42,
                     scenario_priors=scenario_priors,
@@ -553,7 +580,7 @@ def optimize(
         active_squad.remove(sell_id)
         active_squad.append(buy_id)
 
-        current_captain = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
+        current_captain = _pick_captain(active_squad, sim_results, risk_profile, rider_map, intent=intent)
         current_result = _eval_team(
             tuple(sorted(active_squad)), current_captain, stage, riders, probs, n=n_sim, seed=42,
             scenario_priors=scenario_priors,
@@ -575,6 +602,7 @@ def optimize(
         remaining_budget=remaining_budget,
         n=n_sim,
         scenario_priors=scenario_priors,
+        intent=intent,
     )
     if double_result is not None:
         proposed_squad, proposed_captain, sell_pair, buy_pair = double_result
@@ -666,7 +694,7 @@ def optimize(
     transfers = forced_sell_transfers + optimization_transfers
 
     # ── Step 6: captain + final team result (A7) ─────────────────────────────
-    captain_id = _pick_captain(active_squad, sim_results, risk_profile, rider_map)
+    captain_id = _pick_captain(active_squad, sim_results, risk_profile, rider_map, intent=intent)
 
     # Final team result — n_sim sims with fixed seed for the accepted squad
     team_result = _eval_team(
@@ -714,6 +742,8 @@ def optimize_all_profiles(
     stages_remaining: int,
     n_sim: int = 500,
     scenario_priors: Optional[dict] = None,
+    intent: Optional[StageIntent] = None,
+    next_stage: Optional[Stage] = None,
 ) -> dict:
     """Run all 4 profiles in one pass. Returns dict[RiskProfile, ProfileRecommendation]."""
     return {
@@ -730,6 +760,8 @@ def optimize_all_profiles(
             stages_remaining=stages_remaining,
             n_sim=n_sim,
             scenario_priors=scenario_priors,
+            intent=intent,
+            next_stage=next_stage,
         )
         for profile in RiskProfile
     }

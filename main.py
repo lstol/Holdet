@@ -28,6 +28,9 @@ from scoring.simulator import simulate_all_riders
 from scoring.optimizer import (
     optimize_all_profiles, suggest_profile, format_briefing_table,
 )
+from scoring.stage_intent import (
+    StageIntent, compute_stage_intent, apply_intelligence_signals,
+)
 from output.report import BriefingOutput, format_briefing, format_status
 from output.tracker import (
     record_stage_accuracy, format_brier_summary, save_accuracy,
@@ -311,6 +314,47 @@ def cmd_brief(args) -> None:
     if stage.is_ttt:
         print("  *** TTT ***")
 
+    # --lookahead flag: reserved for Session 20
+    if getattr(args, "lookahead", False):
+        print("[lookahead] Not yet implemented — scheduled for Session 20. Continuing without lookahead.")
+
+    # Compute stage intent
+    gc_positions = state.get("gc_standings", {})
+    if isinstance(gc_positions, list):
+        # Convert ordered list to position dict
+        gc_positions = {rid: idx + 1 for idx, rid in enumerate(gc_positions)}
+    intent = compute_stage_intent(stage, gc_positions, next_stage=None, riders=riders)
+
+    # Apply overrides if --override flag provided
+    override_signals_applied: list = []
+    override_path = getattr(args, "override", None)
+    if override_path:
+        with open(override_path, encoding="utf-8") as fh:
+            override_file = json.load(fh)
+        stage_key = f"stage_{args.stage}"
+        if stage_key in override_file:
+            entry = override_file[stage_key]
+            if not entry.get("reason"):
+                raise ValueError(f"Override for {stage_key} missing 'reason' field")
+            intent = apply_intelligence_signals(intent, entry["signals"])
+            override_signals_applied = list(entry["signals"].keys())
+            print(f"[override] Applied signals for {stage_key}: {entry['signals']}")
+            print(f"[override] Reason: {entry['reason']}")
+
+    # Print intent summary
+    overrides_str = ""
+    if override_signals_applied:
+        stage_key_str = f"stage_{args.stage}"
+        sigs = override_file[stage_key_str]["signals"]
+        applied_parts = ", ".join(f"{k}:{sigs[k]}" for k in override_signals_applied)
+        overrides_str = f"\n  [overrides applied: {applied_parts}]"
+    print(
+        f"\nStage Intent ({stage.stage_type}):"
+        f"\n  win_priority={intent.win_priority:.2f}  survival={intent.survival_priority:.2f}  transfer_pressure={intent.transfer_pressure:.2f}"
+        f"\n  team_bonus={intent.team_bonus_value:.2f}    breakaway={intent.breakaway_likelihood:.2f}"
+        f"{overrides_str}"
+    )
+
     # 1. Generate model priors
     probs = generate_priors(riders, stage)
 
@@ -351,6 +395,7 @@ def cmd_brief(args) -> None:
         rank=rank,
         total_participants=total,
         stages_remaining=stages_remaining,
+        intent=intent,
     )
 
     # 6. Build BriefingOutput and render with format_briefing
@@ -851,6 +896,9 @@ def main() -> None:
     p_brief = sub.add_parser("brief", help="Generate pre-stage briefing")
     p_brief.add_argument("--stage", type=int, required=True, help="Upcoming stage number")
     p_brief.add_argument("--odds", action="store_true", help="Collect bookmaker odds before probability adjustment")
+    p_brief.add_argument("--override", metavar="PATH", help="Path to override JSON file (e.g. overrides/stage_3.json)")
+    p_brief.add_argument("--lambda", dest="lambda_val", type=float, default=None, metavar="FLOAT", help="Transfer discount factor (default: 0.85 from config)")
+    p_brief.add_argument("--lookahead", action="store_true", help="[reserved] Multi-stage lookahead (Session 20)")
 
     # settle
     p_settle = sub.add_parser("settle", help="Record stage results and update state")
