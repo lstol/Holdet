@@ -1,7 +1,7 @@
 # Session 18 Summary — ICDL v1: Intelligence-Conditioned Decision Layer
 
-**Date:** 2026-04-24
-**Tests:** 458/458 passing (was 429 at start, +29 new tests)
+**Date:** 2026-04-24 (fixes: 2026-04-25)
+**Tests:** 464/464 passing (429 → 458 in Session 18, +6 in 18-Fixes)
 **Branch:** claude/heuristic-cartwright-4cacf0 → merged to main
 
 ---
@@ -12,6 +12,17 @@
 
 New file. Deterministic, fully testable.
 
+**`INTENT_FIELDS` constant (locked field order — import this, never hardcode):**
+```python
+INTENT_FIELDS: list[str] = [
+    "win_priority",
+    "survival_priority",
+    "transfer_pressure",
+    "team_bonus_value",
+    "breakaway_likelihood",
+]
+```
+
 **`StageIntent` dataclass (frozen):**
 - `win_priority` — how much does winning matter today?
 - `survival_priority` — how bad is DNF / gruppo risk?
@@ -21,16 +32,16 @@ New file. Deterministic, fully testable.
 
 **Base values by stage type:**
 
-| Stage type | win_priority | survival | transfer_pressure | team_bonus | breakaway |
-|------------|-------------|---------|------------------|-----------|----------|
-| flat       | 0.90        | 0.25    | 0.40             | 0.80      | 0.20     |
-| hilly      | 0.75        | 0.55    | 0.55             | 0.60      | 0.45     |
-| mountain   | 0.70        | 0.90    | 0.70             | 0.20      | 0.55     |
-| itt        | 0.85        | 0.20    | 0.30             | 0.10      | 0.05     |
-| ttt        | 0.60        | 0.50    | 0.20             | 1.00      | 0.00     |
+| Stage type | win_priority | survival_priority | transfer_pressure | team_bonus_value | breakaway_likelihood |
+|------------|-------------|------------------|------------------|-----------------|---------------------|
+| flat       | 0.90        | 0.25             | 0.40             | 0.80            | 0.20                |
+| hilly      | 0.75        | 0.55             | 0.55             | 0.60            | 0.45                |
+| mountain   | 0.70        | 0.90             | 0.70             | 0.20            | 0.55                |
+| itt        | 0.85        | 0.20             | 0.30             | 0.10            | 0.05                |
+| ttt        | 0.60        | 0.50             | 0.20             | 1.00            | 0.00                |
 
 **Modifiers (additive, clamped to [0,1]):**
-- `gc_spread_tight`: ≥3 riders gc_position ≤ 5 on mountain → survival +0.10, win +0.05
+- `gc_spread_tight`: ≥3 riders gc_position ≤ 5 on mountain → survival_priority +0.10, win_priority +0.05
 - `next_stage_is_mountain`: flat/hilly → mountain → transfer_pressure +0.20
 - `next_stage_is_flat`: mountain → flat → transfer_pressure +0.15
 - `sprinter_dense_pool`: >30% riders have gc_position=None on flat → breakaway_likelihood +0.05
@@ -48,10 +59,20 @@ New file. Deterministic, fully testable.
 | `gc_rider_illness:confirmed` | survival_priority +0.20, transfer_pressure +0.25 |
 | `stage_shortened:confirmed` | team_bonus_value -0.30 |
 
+**`SIGNAL_ALIASES` dict (user-facing shortcuts):**
+```python
+SIGNAL_ALIASES: dict[str, str] = {
+    "sprint_disruption": "sprint_train_disruption",
+    "gc_illness": "gc_rider_illness",
+}
+```
+
 **`apply_intelligence_signals(intent, signals) → StageIntent`:**
 - Signals format: `{"crosswind_risk": "high"}`
+- Key resolved through `SIGNAL_ALIASES` before lookup
+- Value lowercased before lookup — `"HIGH"` and `"high"` are identical
 - Lookup via `key:value` compound key in `SIGNAL_INTENT_DELTAS`
-- Unknown keys logged at WARNING, not raised
+- Unknown keys (after alias resolution) logged at WARNING, not raised
 - All fields clamped to [0.0, 1.0]
 - Returns NEW StageIntent — original never mutated (frozen dataclass)
 
@@ -75,7 +96,14 @@ New file. Deterministic, fully testable.
 **New imports:**
 ```python
 from config import LAMBDA_TRANSFER
-from scoring.stage_intent import StageIntent, compute_stage_intent, apply_intelligence_signals
+from scoring.stage_intent import StageIntent, compute_stage_intent, apply_intelligence_signals, INTENT_FIELDS
+```
+
+**SESSION 20 BOUNDARY guard** (above EV utility functions):
+```
+# SESSION 20 BOUNDARY — DO NOT WIRE BELOW THIS POINT UNTIL SESSION 20
+# apply_intent_to_ev() and compute_transfer_penalty() are defined here
+# but intentionally not called from _eval_team() or optimize().
 ```
 
 **`apply_intent_to_ev(base_ev, intent) → float`:**
@@ -94,12 +122,18 @@ Both are utility functions — NOT wired into `_eval_team()` yet (Session 20).
 - New optional `intent: StageIntent | None = None` parameter
 - BALANCED profile: `s.expected_value + (intent.win_priority * s.percentile_95 * 0.1 if intent else 0)`
 - ANCHOR and ALL_IN profiles: unchanged
+- Guard comment above BALANCED branch warns of Session 20 double-counting risk
+
+**`_build_reasoning()` updated:**
+- Accepts optional `intent` parameter
+- Appends transfer pressure note when `intent.transfer_pressure >= 0.65`:
+  `"High transfer pressure (0.70) — stage context favours aggressive rotation today."`
 
 **`optimize()` signature:**
 ```python
 def optimize(..., intent: Optional[StageIntent] = None, next_stage: Optional[Stage] = None) -> ProfileRecommendation
 ```
-`intent` passed to all `_pick_captain` call sites inside optimize, including `_try_double_swaps`.
+`intent` passed to all `_pick_captain` and `_build_reasoning` call sites inside optimize, including `_try_double_swaps`.
 
 **`optimize_all_profiles()` signature:**
 ```python
@@ -116,17 +150,23 @@ LAMBDA_TRANSFER: float = 0.85
 ### Part 18D — CLI + API
 
 **`main.py` — `brief` subparser new flags:**
-- `--override PATH` — load override JSON file, apply signals, print summary
+- `--override PATH` — load override JSON file, apply signals, print summary + delta
 - `--lambda FLOAT` — transfer discount factor (stored as `args.lambda_val`)
 - `--lookahead` — logs "not yet implemented, Session 20" and continues
 
-**Intent summary printed at start of brief:**
+**Intent summary printed at start of brief (INTENT_FIELDS order):**
 ```
 Stage Intent (flat):
-  win_priority=0.90  survival=0.25  transfer_pressure=0.40
-  team_bonus=0.80    breakaway=0.20
-  [overrides applied: crosswind_risk:high]   ← only if --override used
+  win_priority=0.90  survival_priority=0.25  transfer_pressure=0.40  team_bonus_value=0.80  breakaway_likelihood=0.20
 ```
+
+**Delta block printed when `--override` used and fields changed:**
+```
+Intent delta (from overrides):
+  breakaway_likelihood     0.20 → 0.45  (+0.25)
+  survival_priority        0.25 → 0.40  (+0.15)
+```
+Silent when `--override` not used.
 
 **`api/server.py` — `BriefRequest` new fields:**
 ```python
@@ -140,7 +180,7 @@ next_stage_type: Optional[str] = None   # reserved for Session 20
 - If `intelligence_signals` provided: validates `intelligence_reason` (HTTP 400 if missing), applies signals
 - Passes `intent` to `optimize_all_profiles()`
 
-**`/brief` response includes:**
+**`/brief` response includes (INTENT_FIELDS order):**
 ```json
 "stage_intent": {
     "win_priority": 0.90,
@@ -153,28 +193,30 @@ next_stage_type: Optional[str] = None   # reserved for Session 20
 
 ---
 
-## Test breakdown (+29 new)
+## Test breakdown (464 total, +35 from Session 18 baseline of 429)
+
+### Session 18 — 29 new tests
 
 **`tests/test_stage_intent.py` (24 new tests):**
 
 `TestComputeStageIntent` (11 tests):
 - flat stage high win_priority
-- mountain stage high survival
-- ITT low breakaway
-- TTT max team_bonus
+- mountain stage high survival_priority
+- ITT low breakaway_likelihood
+- TTT max team_bonus_value
 - next_mountain increases transfer_pressure
 - next_flat increases transfer_pressure on mountain
-- tight GC boosts survival on mountain
-- tight GC does NOT affect flat survival
+- tight GC boosts survival_priority on mountain
+- tight GC does NOT affect flat survival_priority
 - all fields clamped to [0,1] under stacked modifiers
-- sprinter-dense pool raises breakaway on flat
+- sprinter-dense pool raises breakaway_likelihood on flat
 - hilly base values exact
 
 `TestApplyIntelligenceOverrides` (8 tests):
-- crosswind raises breakaway and survival
+- crosswind raises breakaway_likelihood and survival_priority
 - sprint disruption lowers win_priority
-- gc_illness raises survival and transfer_pressure
-- stage_shortened lowers team_bonus
+- gc_illness raises survival_priority and transfer_pressure
+- stage_shortened lowers team_bonus_value
 - unknown signal ignored, not raised
 - returns new intent, original unchanged
 - stacked signals clamped to [0,1]
@@ -198,14 +240,37 @@ next_stage_type: Optional[str] = None   # reserved for Session 20
 - λ=0, win_priority=0 → net_ev == base_ev - fee (pre-Session-18 behaviour)
 - ANCHOR captain identical with and without intent
 
+### Session 18-Fixes — 6 new tests
+
+**`tests/test_stage_intent.py` (+5):**
+
+`TestSignalAliasesAndNormalization` (4 tests):
+- `sprint_disruption` alias → same result as `sprint_train_disruption`
+- `gc_illness` alias → same result as `gc_rider_illness`
+- unknown alias: no exception, intent unchanged
+- value casing: `"HIGH"` / `"High"` / `"high"` all produce identical results
+
+`TestIntentImmutability` (1 test):
+- `base is not modified`, value changed, no side effects on base, no shared instance
+
+**`tests/test_optimizer.py` (+1):**
+
+`TestIntentDoesNotAffectOptimizerPreSession20` (1 test):
+- optimize() with ANCHOR profile + intent produces identical squad, transfers, and EV vs intent=None
+
 ---
 
 ## Key design decisions confirmed
 
 | Decision | Outcome |
 |----------|---------|
-| apply_intent_to_ev wiring | NOT in _eval_team() — utility function only, wired in Session 20 |
+| `INTENT_FIELDS` | Defined once in stage_intent.py; imported everywhere field iteration needed |
+| `apply_intent_to_ev` wiring | NOT in _eval_team() — SESSION 20 BOUNDARY guard prevents accidental wiring |
 | Override validation | reason field checked in cmd_brief, not in apply_intelligence_signals |
+| Signal aliases | SIGNAL_ALIASES resolves short keys; value casing always normalized to lowercase |
 | gc_positions input | list → dict conversion handled in main.py and api/server.py |
 | _try_double_swaps | Also receives intent and threads it to _pick_captain |
 | StageIntent frozen | Immutable by design — apply_intelligence_signals always returns new instance |
+| Captain formula | Simulation EV + intent.win_priority × p95 × 0.1 (BALANCED only); NOT probability-based |
+| Double-counting risk | Guard comment in _pick_captain BALANCED branch — revisit at Session 20 start |
+| Transfer pressure note | Visible in briefing reasoning when transfer_pressure ≥ 0.65 |
