@@ -14,6 +14,17 @@ from scoring.engine import Stage
 logger = logging.getLogger(__name__)
 
 
+# Canonical field order — use this everywhere fields are iterated.
+# Import and reference this constant; never hardcode a different order.
+INTENT_FIELDS: list[str] = [
+    "win_priority",
+    "survival_priority",
+    "transfer_pressure",
+    "team_bonus_value",
+    "breakaway_likelihood",
+]
+
+
 @dataclass(frozen=True)
 class StageIntent:
     win_priority: float         # 0–1: how much does winning matter today?
@@ -102,6 +113,12 @@ SIGNAL_INTENT_DELTAS: dict[str, dict[str, float]] = {
     },
 }
 
+# Alias map — short user-facing keys → canonical SIGNAL_INTENT_DELTAS keys.
+SIGNAL_ALIASES: dict[str, str] = {
+    "sprint_disruption": "sprint_train_disruption",
+    "gc_illness": "gc_rider_illness",
+}
+
 
 def apply_intelligence_signals(
     intent: StageIntent,
@@ -117,26 +134,24 @@ def apply_intelligence_signals(
     }
 
     Each key:value pair is looked up in SIGNAL_INTENT_DELTAS as "key:value".
-    Unknown signal keys are ignored (logged at WARNING level).
+    Keys are resolved through SIGNAL_ALIASES before lookup.
+    Values are lowercased before lookup (case-insensitive).
+    Unknown signal keys (after alias resolution) are ignored (logged at WARNING).
     All resulting field values are clamped to [0.0, 1.0].
 
     Returns a NEW StageIntent (original is not mutated).
     """
-    fields = {
-        "win_priority": intent.win_priority,
-        "survival_priority": intent.survival_priority,
-        "transfer_pressure": intent.transfer_pressure,
-        "team_bonus_value": intent.team_bonus_value,
-        "breakaway_likelihood": intent.breakaway_likelihood,
-    }
+    fields = {f: getattr(intent, f) for f in INTENT_FIELDS}
 
     for key, value in signals.items():
-        signal_key = f"{key}:{value}"
-        if signal_key not in SIGNAL_INTENT_DELTAS:
-            logger.warning("Unknown intelligence signal '%s' — ignored", signal_key)
+        k_norm = SIGNAL_ALIASES.get(key, key)       # resolve alias
+        v_norm = str(value).lower()                  # normalize value casing
+        canonical_key = f"{k_norm}:{v_norm}"
+        if canonical_key not in SIGNAL_INTENT_DELTAS:
+            logger.warning("Unknown intelligence signal '%s' — ignored", canonical_key)
             continue
-        for field, delta in SIGNAL_INTENT_DELTAS[signal_key].items():
-            fields[field] = fields[field] + delta
+        for field_name, delta in SIGNAL_INTENT_DELTAS[canonical_key].items():
+            fields[field_name] = fields[field_name] + delta
 
     return StageIntent(
         win_priority=_clamp(fields["win_priority"]),

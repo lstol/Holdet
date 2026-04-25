@@ -68,9 +68,11 @@ _eval_cache: dict = {}
 NOISE_FLOOR = 20_000
 
 
-# ── Intent utility functions (Session 18) ────────────────────────────────────
-# These exist for CLI display and future wiring in Session 20.
-# NOT currently wired into _eval_team().
+# SESSION 20 BOUNDARY — DO NOT WIRE BELOW THIS POINT UNTIL SESSION 20
+# apply_intent_to_ev() and compute_transfer_penalty() are defined here
+# but intentionally not called from _eval_team() or optimize().
+# Wiring happens in Session 20 (lookahead optimizer).
+# See: docs/MULTI_STAGE_ARCHITECTURE.md
 
 def apply_intent_to_ev(base_ev: float, intent: StageIntent) -> float:
     """Scale EV by stage intent. win_priority boosts expected stage winners."""
@@ -322,6 +324,11 @@ def _pick_captain(
         return max(eligible_ids, key=lambda rid: sim_results[rid].percentile_10)
 
     elif profile == RiskProfile.BALANCED:
+        # NOTE — SESSION 20 DOUBLE-COUNTING RISK:
+        # win_priority biases captain toward high-p95 riders here.
+        # If apply_intent_to_ev() is wired in Session 20 (scales all EVs by
+        # win_priority), this term may need to be reduced or removed to avoid
+        # counting win_priority twice. Revisit at Session 20 start.
         def balanced_score(rid):
             s = sim_results[rid]
             return s.expected_value + (intent.win_priority * s.percentile_95 * 0.1 if intent else 0)
@@ -340,6 +347,7 @@ def _build_reasoning(
     rider_map: dict,
     n_transfers: int,
     stage: Stage,
+    intent: Optional[StageIntent] = None,
 ) -> str:
     descriptions = {
         RiskProfile.ANCHOR: (
@@ -361,13 +369,23 @@ def _build_reasoning(
         ),
     }
     if profile == RiskProfile.ANCHOR:
-        return descriptions[profile].format(n_transfers)
+        base = descriptions[profile].format(n_transfers)
     elif profile == RiskProfile.BALANCED:
-        return descriptions[profile].format(n_transfers)
+        base = descriptions[profile].format(n_transfers)
     elif profile == RiskProfile.AGGRESSIVE:
-        return descriptions[profile].format(stage.stage_type, n_transfers)
+        base = descriptions[profile].format(stage.stage_type, n_transfers)
     else:
-        return descriptions[profile].format(stage.stage_type, n_transfers)
+        base = descriptions[profile].format(stage.stage_type, n_transfers)
+
+    if intent and intent.transfer_pressure >= 0.65:
+        suffix = (
+            f"High transfer pressure ({intent.transfer_pressure:.2f}) — "
+            "stage context favours aggressive rotation today."
+        )
+        if not base.endswith("."):
+            base += "."
+        base += " " + suffix
+    return base
 
 
 # ── Core optimizer ────────────────────────────────────────────────────────────
@@ -723,7 +741,7 @@ def optimize(
         upside_90pct=total_p90,
         downside_10pct=total_p10,
         transfer_cost=total_cost,
-        reasoning=_build_reasoning(risk_profile, active_squad, rider_map, n_transfers, stage),
+        reasoning=_build_reasoning(risk_profile, active_squad, rider_map, n_transfers, stage, intent=intent),
         team_result=team_result,
     )
 

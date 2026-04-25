@@ -29,7 +29,7 @@ from scoring.optimizer import (
     optimize_all_profiles, suggest_profile, format_briefing_table,
 )
 from scoring.stage_intent import (
-    StageIntent, compute_stage_intent, apply_intelligence_signals,
+    StageIntent, compute_stage_intent, apply_intelligence_signals, INTENT_FIELDS,
 )
 from output.report import BriefingOutput, format_briefing, format_status
 from output.tracker import (
@@ -326,8 +326,9 @@ def cmd_brief(args) -> None:
     intent = compute_stage_intent(stage, gc_positions, next_stage=None, riders=riders)
 
     # Apply overrides if --override flag provided
-    override_signals_applied: list = []
+    base_intent = intent
     override_path = getattr(args, "override", None)
+    override_file: dict = {}
     if override_path:
         with open(override_path, encoding="utf-8") as fh:
             override_file = json.load(fh)
@@ -337,23 +338,28 @@ def cmd_brief(args) -> None:
             if not entry.get("reason"):
                 raise ValueError(f"Override for {stage_key} missing 'reason' field")
             intent = apply_intelligence_signals(intent, entry["signals"])
-            override_signals_applied = list(entry["signals"].keys())
             print(f"[override] Applied signals for {stage_key}: {entry['signals']}")
             print(f"[override] Reason: {entry['reason']}")
 
-    # Print intent summary
-    overrides_str = ""
-    if override_signals_applied:
-        stage_key_str = f"stage_{args.stage}"
-        sigs = override_file[stage_key_str]["signals"]
-        applied_parts = ", ".join(f"{k}:{sigs[k]}" for k in override_signals_applied)
-        overrides_str = f"\n  [overrides applied: {applied_parts}]"
-    print(
-        f"\nStage Intent ({stage.stage_type}):"
-        f"\n  win_priority={intent.win_priority:.2f}  survival={intent.survival_priority:.2f}  transfer_pressure={intent.transfer_pressure:.2f}"
-        f"\n  team_bonus={intent.team_bonus_value:.2f}    breakaway={intent.breakaway_likelihood:.2f}"
-        f"{overrides_str}"
-    )
+    # Intent summary (INTENT_FIELDS order)
+    print(f"\nStage Intent ({stage.stage_type}):")
+    for f in INTENT_FIELDS:
+        print(f"  {f}={getattr(intent, f):.2f}", end="  ")
+    print()
+
+    # Delta block — only when --override used and something changed
+    if override_path and base_intent is not None:
+        deltas = []
+        for f in INTENT_FIELDS:
+            before = getattr(base_intent, f)
+            after = getattr(intent, f)
+            if abs(after - before) > 1e-6:
+                deltas.append((f, before, after))
+        if deltas:
+            print("\nIntent delta (from overrides):")
+            for f, before, after in deltas:
+                sign = "+" if after > before else "−"
+                print(f"  {f:<24} {before:.2f} → {after:.2f}  ({sign}{abs(after - before):.2f})")
 
     # 1. Generate model priors
     probs = generate_priors(riders, stage)

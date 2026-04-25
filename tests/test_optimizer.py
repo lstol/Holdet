@@ -1358,6 +1358,16 @@ class TestICDLRegressionGuard:
             f"ICDL regression: expected {pre_session18_net}, got {net_ev}"
         )
 
+    def _squad_from_rec(self, rec, my_team):
+        """Derive final squad from transfers applied to my_team."""
+        squad = set(my_team)
+        for t in rec.transfers:
+            if t.action == "sell":
+                squad.discard(t.rider_id)
+            elif t.action == "buy":
+                squad.add(t.rider_id)
+        return squad
+
     def test_anchor_captain_unaffected_by_intent(self):
         """ANCHOR captain selection is identical with and without intent."""
         import scoring.optimizer as opt_mod
@@ -1372,3 +1382,64 @@ class TestICDLRegressionGuard:
         captain_without = _pick_captain(ids, sr, RiskProfile.ANCHOR, rider_map, intent=None)
         captain_with = _pick_captain(ids, sr, RiskProfile.ANCHOR, rider_map, intent=intent)
         assert captain_without == captain_with
+
+
+# ── TestIntentDoesNotAffectOptimizerPreSession20 (18H) ───────────────────────
+
+class TestIntentDoesNotAffectOptimizerPreSession20:
+    """
+    Regression guard: optimize() must produce identical squad, transfers, and
+    expected_value with intent=None and intent=some_intent until Session 20
+    wires apply_intent_to_ev() into _eval_team().
+    Captain is allowed to differ for BALANCED profile (intent nudges it).
+    """
+
+    def _squad_from_rec(self, rec, my_team):
+        squad = set(my_team)
+        for t in rec.transfers:
+            if t.action == "sell":
+                squad.discard(t.rider_id)
+            elif t.action == "buy":
+                squad.add(t.rider_id)
+        return squad
+
+    def test_optimizer_output_identical_with_and_without_intent(self):
+        import scoring.optimizer as opt_mod
+        pool, ids, sr = _build_pool()
+        stage = _flat_stage()
+        intent = compute_stage_intent(stage, {}, next_stage=None, riders=pool)
+
+        opt_mod._eval_cache.clear()
+        rec1 = optimize(
+            riders=pool,
+            my_team=ids,
+            stage=stage,
+            probs={},
+            sim_results=sr,
+            bank=50_000_000,
+            risk_profile=RiskProfile.ANCHOR,
+            rank=None,
+            total_participants=None,
+            stages_remaining=10,
+            n_sim=10,
+            intent=None,
+        )
+        opt_mod._eval_cache.clear()
+        rec2 = optimize(
+            riders=pool,
+            my_team=ids,
+            stage=stage,
+            probs={},
+            sim_results=sr,
+            bank=50_000_000,
+            risk_profile=RiskProfile.ANCHOR,
+            rank=None,
+            total_participants=None,
+            stages_remaining=10,
+            n_sim=10,
+            intent=intent,
+        )
+
+        assert self._squad_from_rec(rec1, ids) == self._squad_from_rec(rec2, ids)
+        assert rec1.transfers == rec2.transfers
+        assert abs(rec1.expected_value - rec2.expected_value) < 1.0

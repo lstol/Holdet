@@ -2,7 +2,7 @@
 # Each session has a clear goal, defined inputs, and a done condition.
 # Do not start a session until the previous session's done condition is met.
 # If debugging becomes circular (3+ failed attempts), stop and bring to Claude.ai.
-# Last updated: 2026-04-24 (Session 18 complete: ICDL v1)
+# Last updated: 2026-04-25 (Session 18-Fixes complete: stabilization)
 
 ---
 
@@ -738,13 +738,11 @@ LAMBDA_TRANSFER = 0.85   # in config.py
 
 **Captain scoring:**
 ```python
-captain_value = (
-    2.0 * p_win +
-    1.2 * p_top15 +
-    intent.win_priority
-)
+# BALANCED captain uses simulation EV with intent-weighted p95 nudge:
+# score = expected_value + intent.win_priority * percentile_95 * 0.1
+# ANCHOR: argmax(p10)   ALL_IN: argmax(p95)   — both unchanged by intent
 ```
-Replaces static `argmax(p_win)`. Encodes rule 2 (balance certainty vs spike).
+Simulation-based (not probability formula). Intent nudges BALANCED only.
 
 #### 18D — CLI
 
@@ -959,6 +957,7 @@ clean briefing.
 | 14            | ✓ complete (2026-04-22)   | Simulation layer rebuild             | Coherent stage outcomes              | —     |
 | 15            | ✓ complete (2026-04-22)   | Team-level optimizer                 | Squad-level EV + role display        | 407   |
 | 15-Fixes      | ✓ complete (2026-04-22)   | Cache, threshold, role fixes         | Correctness + etapebonus diag        | 415   |
+| 18-Fixes      | ✓ complete (2026-04-25)   | Naming, aliases, guards, reasoning   | ICDL stabilized for Session 19       | 464   |
 | 16            | ✓ complete (2026-04-24)   | Scenario-aware simulation            | User scenario control                | 429   |
 | 17            | planned                   | Live validation + calibration        | Engine confirmed correct             | ~440  |
 | 18            | ✓ complete (2026-04-24)   | ICDL v1 — stage intent               | System understands race meaning      | 458   |
@@ -991,7 +990,7 @@ Run 19 in parallel once 5 stages of data are available.
 | λ (transfer weight) | Fixed 0.85, exposed as `--lambda` CLI flag | Strategy knob, not model parameter |
 | Session 18.5 | Absorbed into Session 18 as `--override` flag | No fragmentation |
 | Lookahead timing | Session 20 (after ICDL, not before) | Intent first, optimization second |
-| Captain logic | Intent-weighted: 2×p_win + 1.2×p_top15 + win_priority | Encodes rule 2 directly |
+| Captain logic | Simulation EV + intent.win_priority × p95 × 0.1 (BALANCED only) | Matches implementation |
 | Sprinter penalty | Structural p_dnf_equivalent signal | Not a hard rule — brittle-proof |
 | Intent → EV | `ev * (1 + 0.3 * win_priority)` | All 3 heuristics intent-weighted |
 

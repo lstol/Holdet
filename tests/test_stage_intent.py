@@ -13,6 +13,7 @@ from scoring.stage_intent import (
     compute_stage_intent,
     apply_intelligence_signals,
     SIGNAL_INTENT_DELTAS,
+    SIGNAL_ALIASES,
 )
 from scoring.optimizer import apply_intent_to_ev, compute_transfer_penalty
 
@@ -248,3 +249,61 @@ class TestIntentEVFunctions:
         penalty = compute_transfer_penalty(fee, intent)       # = fee (pressure=0)
         net_ev = adjusted_ev - penalty + lambda_val * next_ev
         assert abs(net_ev - (base_ev - fee)) < 1.0
+
+
+# ── TestSignalAliasesAndNormalization (18F) ───────────────────────────────────
+
+class TestSignalAliasesAndNormalization:
+    def _flat_intent(self) -> StageIntent:
+        return compute_stage_intent(_make_stage("flat"), {}, next_stage=None, riders=[])
+
+    def test_sprint_disruption_alias_resolves_correctly(self):
+        intent = self._flat_intent()
+        via_alias = apply_intelligence_signals(intent, {"sprint_disruption": "likely"})
+        via_canonical = apply_intelligence_signals(intent, {"sprint_train_disruption": "likely"})
+        assert via_alias == via_canonical
+
+    def test_gc_illness_alias_resolves_correctly(self):
+        intent = self._flat_intent()
+        via_alias = apply_intelligence_signals(intent, {"gc_illness": "confirmed"})
+        via_canonical = apply_intelligence_signals(intent, {"gc_rider_illness": "confirmed"})
+        assert via_alias == via_canonical
+
+    def test_unknown_alias_still_warns_not_raises(self):
+        intent = self._flat_intent()
+        # Must not raise; unknown key after alias resolution → WARNING
+        updated = apply_intelligence_signals(intent, {"completely_unknown": "value"})
+        assert updated == intent  # no changes applied
+
+    def test_value_casing_normalized(self):
+        intent = self._flat_intent()
+        lower = apply_intelligence_signals(intent, {"crosswind_risk": "high"})
+        upper = apply_intelligence_signals(intent, {"crosswind_risk": "HIGH"})
+        mixed = apply_intelligence_signals(intent, {"crosswind_risk": "High"})
+        assert lower == upper == mixed
+
+
+# ── TestIntentImmutability (18L) ──────────────────────────────────────────────
+
+class TestIntentImmutability:
+    def test_apply_intelligence_signals_does_not_mutate_original(self):
+        """
+        apply_intelligence_signals() must return a new StageIntent.
+        The original must be identical to a freshly computed intent
+        (no shared mutable state, no caching side effects).
+        """
+        stage = Stage(
+            number=3, race="giro_2026", stage_type="flat",
+            distance_km=180, is_ttt=False,
+            start_location="A", finish_location="B",
+        )
+        base = compute_stage_intent(stage, gc_positions={}, next_stage=None, riders=[])
+        signals = {"crosswind_risk": "high"}
+
+        modified = apply_intelligence_signals(base, signals)
+
+        assert base is not modified
+        assert base.breakaway_likelihood != modified.breakaway_likelihood
+        recomputed = compute_stage_intent(stage, gc_positions={}, next_stage=None, riders=[])
+        assert base == recomputed        # no side effects on base
+        assert base is not recomputed   # no shared instance / caching

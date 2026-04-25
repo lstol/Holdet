@@ -35,7 +35,7 @@ from scoring.engine import (
 from scoring.probabilities import generate_priors, save_probs, _rider_roles
 from scoring.simulator import simulate_all_riders, STAGE_SCENARIOS, _resolve_scenarios, simulate_team
 from scoring.optimizer import optimize_all_profiles, suggest_profile, RiskProfile
-from scoring.stage_intent import StageIntent, compute_stage_intent, apply_intelligence_signals
+from scoring.stage_intent import StageIntent, compute_stage_intent, apply_intelligence_signals, INTENT_FIELDS
 from output.tracker import record_stage_accuracy, save_accuracy
 
 
@@ -465,13 +465,7 @@ def post_brief(req: BriefRequest) -> dict:
         "dns_alerts": dns_alerts,
         "scenario_priors": {k: round(v, 4) for k, v in resolved_scenarios.items()},
         "scenario_stats": {k: round(v, 4) for k, v in realized_scenario_stats.items()},
-        "stage_intent": {
-            "win_priority": intent.win_priority,
-            "survival_priority": intent.survival_priority,
-            "transfer_pressure": intent.transfer_pressure,
-            "team_bonus_value": intent.team_bonus_value,
-            "breakaway_likelihood": intent.breakaway_likelihood,
-        },
+        "stage_intent": {f: getattr(intent, f) for f in INTENT_FIELDS},
     }
     if not my_team:
         resp["team_note"] = "No team picked yet — showing best team to select from scratch."
