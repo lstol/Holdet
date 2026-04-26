@@ -2,7 +2,7 @@
 # Each session has a clear goal, defined inputs, and a done condition.
 # Do not start a session until the previous session's done condition is met.
 # If debugging becomes circular (3+ failed attempts), stop and bring to Claude.ai.
-# Last updated: 2026-04-26 (Session 19.6 complete: rider identity stabilization layer)
+# Last updated: 2026-04-26 (Session 20 complete: identity-aware lookahead EV layer)
 
 ---
 
@@ -964,7 +964,7 @@ clean briefing.
 | 19            | ✓ complete (2026-04-25)   | Calibration pass                     | Data-driven model constants          | 477   |
 | 19.5          | ✓ complete (2026-04-26)   | Rider-level expert adjustments       | Ephemeral signal injection           | 485   |
 | 19.6          | ✓ complete (2026-04-26)   | Rider identity stabilization layer   | Static profile multipliers           | 491   |
-| 20            | planned                   | Lookahead optimizer v1               | Non-myopic decisions (now safe)      | ~497  |
+| 20            | ✓ complete (2026-04-26)   | Identity-aware lookahead EV layer    | Per-rider multi-stage projection     | 502   |
 | 21            | planned                   | Optimizer quality                    | Shared sims, faster, smarter         | ~476  |
 | 22            | planned                   | Variance-aware profiles + captain    | Real risk behavior                   | ~486  |
 | 23            | planned                   | Intelligence + differential picks    | Biggest competitive edge             | ~494  |

@@ -56,11 +56,17 @@ class ProfileRecommendation:
     transfer_cost: int
     reasoning: str
     team_result: Optional[TeamSimResult] = field(default=None)
+    lookahead_ev: Optional[float] = field(default=None)  # set when enable_lookahead=True (Session 21)
 
 
-# ── Module-level eval cache (cleared at start of each optimize() call) ─────────
+# ── Module-level eval caches ──────────────────────────────────────────────────
 
 _eval_cache: dict = {}
+_lookahead_cache: dict = {}  # separate cache for 2-stage results (Session 21)
+
+# Lookahead constants (Session 20 infrastructure — activated in Session 21)
+LOOKAHEAD_ALPHA: float = 0.85   # discount for next-stage EV
+LOOKAHEAD_N: int = 200          # fast-sim count for N+1 lookahead
 
 # Noise floor for improvement thresholds (≈ one position improvement at n=500).
 # Prevents accepting random simulation noise as a meaningful gain.
@@ -86,6 +92,56 @@ def compute_transfer_penalty(fee: int, intent: StageIntent) -> float:
     Returns the adjusted penalty (always >= fee).
     """
     return fee * (1.0 + intent.transfer_pressure)
+
+
+# ── Lookahead: 2-stage team evaluator (infrastructure for Session 21) ─────────
+
+def evaluate_action_multistage(
+    squad_ids: tuple,
+    captain_id: str,
+    stage: Stage,
+    all_riders: list,
+    probs: dict,
+    next_stage: Stage,
+    probs_n1: dict,
+    intent_n1: Optional[StageIntent] = None,
+    n: int = LOOKAHEAD_N,
+    seed: int = 42,
+    scenario_priors: Optional[dict] = None,
+) -> float:
+    """
+    Two-stage combined EV: current stage + LOOKAHEAD_ALPHA × next stage.
+
+    Stage N: team simulation at n sims.
+    Stage N+1: fast lookahead at LOOKAHEAD_N sims, separate cache.
+    Returns combined expected value for squad evaluation.
+
+    Session 21 activates this via enable_lookahead=True in optimize().
+    When enable_lookahead=False (default), _eval_team is called directly — no change.
+    """
+    global _lookahead_cache
+
+    # Stage N: standard team evaluation
+    result_n = _eval_team(
+        squad_ids, captain_id, stage, all_riders, probs,
+        n=n, seed=seed, scenario_priors=scenario_priors,
+    )
+
+    # Stage N+1: fast lookahead, separate cache keyed by stage number
+    key_n1 = (tuple(sorted(squad_ids)), captain_id, next_stage.number)
+    if key_n1 not in _lookahead_cache:
+        _lookahead_cache[key_n1] = simulate_team(
+            team=list(squad_ids),
+            captain=captain_id,
+            stage=next_stage,
+            riders=all_riders,
+            probs=probs_n1,
+            n=LOOKAHEAD_N,
+            seed=seed,
+        )
+    result_n1 = _lookahead_cache[key_n1]
+
+    return result_n.expected_value + LOOKAHEAD_ALPHA * result_n1.expected_value
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -206,6 +262,7 @@ def _try_double_swaps(
     n_attempts: int = 20,
     scenario_priors: Optional[dict] = None,
     intent: Optional[StageIntent] = None,
+    eval_fn=None,  # reserved for Session 21 — pass evaluate_action_multistage when ready
 ) -> Optional[tuple]:
     """
     Random double-swap exploration after greedy convergence (A5).
@@ -405,6 +462,9 @@ def optimize(
     scenario_priors: Optional[dict] = None,
     intent: Optional[StageIntent] = None,
     next_stage: Optional[Stage] = None,
+    enable_lookahead: bool = False,          # Session 21: activate 2-stage eval
+    probs_n1: Optional[dict] = None,         # Session 21: probs for next stage
+    intent_n1: Optional[StageIntent] = None, # Session 21: intent for next stage
 ) -> ProfileRecommendation:
     """
     Find the optimal squad for the given risk profile.
@@ -420,9 +480,27 @@ def optimize(
 
     n_sim : simulations per team evaluation (default 500). Lower values (50–200)
             trade accuracy for speed during optimization.
+    enable_lookahead : Session 21 — routes evaluation through evaluate_action_multistage.
     """
-    global _eval_cache
+    global _eval_cache, _lookahead_cache
     _eval_cache.clear()
+    _lookahead_cache.clear()
+
+    # _eval closure: routes to single-stage or 2-stage evaluator.
+    # When enable_lookahead=False (default): identical to previous _eval_team calls.
+    # When enable_lookahead=True + next_stage + probs_n1 set: uses evaluate_action_multistage.
+    # Session 21 wires the greedy/double-swap loops to use _eval instead of _eval_team.
+    def _eval(squad_t: tuple, captain_id: str) -> float:
+        if enable_lookahead and next_stage is not None and probs_n1 is not None:
+            return evaluate_action_multistage(
+                squad_t, captain_id, stage, riders, probs,
+                next_stage, probs_n1, intent_n1, n=n_sim,
+            )
+        result = _eval_team(squad_t, captain_id, stage, riders, probs, n=n_sim, seed=42,
+                            scenario_priors=scenario_priors)
+        return _team_metric(result, risk_profile)
+
+    _ = _eval  # referenced by Session 21 — suppress unused-variable warnings
 
     rider_map: dict = {r.holdet_id: r for r in riders}
 
@@ -762,6 +840,9 @@ def optimize_all_profiles(
     scenario_priors: Optional[dict] = None,
     intent: Optional[StageIntent] = None,
     next_stage: Optional[Stage] = None,
+    enable_lookahead: bool = False,
+    probs_n1: Optional[dict] = None,
+    intent_n1: Optional[StageIntent] = None,
 ) -> dict:
     """Run all 4 profiles in one pass. Returns dict[RiskProfile, ProfileRecommendation]."""
     return {
@@ -780,6 +861,9 @@ def optimize_all_profiles(
             scenario_priors=scenario_priors,
             intent=intent,
             next_stage=next_stage,
+            enable_lookahead=enable_lookahead,
+            probs_n1=probs_n1,
+            intent_n1=intent_n1,
         )
         for profile in RiskProfile
     }

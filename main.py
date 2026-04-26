@@ -31,6 +31,7 @@ from scoring.probabilities import (
     _rider_type,
 )
 from scoring.rider_profiles import RiderProfile
+from scoring.lookahead import simulate_lookahead, format_lookahead_table
 from scoring.odds import cli_odds_input
 from scoring.simulator import simulate_all_riders
 from scoring.optimizer import (
@@ -298,6 +299,62 @@ def cmd_ingest(args) -> None:
     print(f"\nState saved to {state_path}")
 
 
+def _load_stages_from(stages_path: str, from_stage: int) -> list:
+    """Return all Stage objects with number >= from_stage, sorted by number."""
+    if not os.path.exists(stages_path):
+        return []
+    with open(stages_path, encoding="utf-8") as fh:
+        stages_data = json.load(fh)
+    if isinstance(stages_data, list):
+        stages_list = stages_data
+    elif isinstance(stages_data, dict) and "stages" in stages_data:
+        stages_list = stages_data["stages"]
+    elif isinstance(stages_data, dict):
+        stages_list = [v for v in stages_data.values() if isinstance(v, dict)]
+    else:
+        return []
+
+    result = []
+    for s in stages_list:
+        if not isinstance(s, dict):
+            continue
+        num = s.get("number", 0)
+        if num < from_stage:
+            continue
+        sprint_points = [
+            SprintPoint(
+                location=sp.get("location", ""),
+                km_from_start=float(sp.get("km_from_start", 0)),
+                points_available=sp.get("points_available", []),
+                is_finish=sp.get("is_finish", False),
+            )
+            for sp in s.get("sprint_points", [])
+        ]
+        kom_points = [
+            KOMPoint(
+                location=kp.get("location", ""),
+                km_from_start=float(kp.get("km_from_start", 0)),
+                category=kp.get("category", "4"),
+                points_available=kp.get("points_available", []),
+            )
+            for kp in s.get("kom_points", [])
+        ]
+        result.append(Stage(
+            number=num,
+            race=s.get("race", "giro_2026"),
+            stage_type=s.get("stage_type", "flat"),
+            distance_km=float(s.get("distance_km", 0)),
+            is_ttt=s.get("is_ttt", False),
+            start_location=s.get("start_location", ""),
+            finish_location=s.get("finish_location", ""),
+            sprint_points=sprint_points,
+            kom_points=kom_points,
+            notes=s.get("notes", ""),
+        ))
+    result.sort(key=lambda st: st.number)
+    return result
+
+
 def _resolve_profiles(
     profiles_raw: dict,
     riders: list,
@@ -328,6 +385,65 @@ def _resolve_profiles(
     return result
 
 
+def cmd_lookahead(args) -> None:
+    """Project per-rider EV over a multi-stage horizon."""
+    riders_path = config.get_riders_path()
+    stages_path = config.get_stages_path()
+    state_path = config.get_state_path()
+    profiles_path = config.get_rider_profiles_path()
+
+    riders = load_riders(riders_path)
+    stage = _load_stage(stages_path, args.stage)
+    state = _load_state(state_path)
+    my_team = state.get("my_team", [])
+
+    # Load all stages from this one onwards
+    forward_stages = _load_stages_from(stages_path, args.stage)
+    if not forward_stages:
+        forward_stages = [stage]
+
+    # Base probs from model priors (no interactive adjust — lookahead is analytical only)
+    probs = generate_priors(riders, stage)
+
+    # Load rider profiles
+    profiles_raw: dict = {}
+    if os.path.exists(profiles_path):
+        with open(profiles_path, encoding="utf-8") as fh:
+            profiles_raw = json.load(fh)
+    profiles = _resolve_profiles(profiles_raw, riders)
+
+    # Adjustments by stage from state
+    all_adjs = state.get("rider_adjustments", {})
+    adjustments_by_stage = {
+        s.number: all_adjs.get(str(s.number), {})
+        for s in forward_stages[:args.horizon]
+    }
+
+    horizon = min(args.horizon, len(forward_stages))
+    n_sim = 200
+
+    print(f"\nStage {args.stage}: lookahead horizon={horizon}, n={n_sim} sims/stage")
+    results = simulate_lookahead(
+        riders=riders,
+        stages=forward_stages,
+        base_probs=probs,
+        profiles=profiles,
+        adjustments_by_stage=adjustments_by_stage,
+        horizon=horizon,
+        n_sim=n_sim,
+    )
+
+    top = getattr(args, "top", 20)
+    print("\n" + format_lookahead_table(
+        results=results,
+        riders=riders,
+        horizon=horizon,
+        n_sim=n_sim,
+        my_team=my_team,
+        top=top,
+    ))
+
+
 def cmd_brief(args) -> None:
     """Generate pre-stage briefing across all 4 risk profiles."""
     riders_path = config.get_riders_path()
@@ -352,9 +468,7 @@ def cmd_brief(args) -> None:
     if stage.is_ttt:
         print("  *** TTT ***")
 
-    # --lookahead flag: reserved for Session 20
-    if getattr(args, "lookahead", False):
-        print("[lookahead] Not yet implemented — scheduled for Session 20. Continuing without lookahead.")
+    _lookahead_requested = getattr(args, "lookahead", False)
 
     # Compute stage intent
     gc_positions = state.get("gc_standings", {})
@@ -479,6 +593,36 @@ def cmd_brief(args) -> None:
         profiles=recommendations,
     )
     print("\n" + format_briefing(briefing_output, state))
+
+    # 6b. Optional lookahead table (--lookahead flag)
+    if _lookahead_requested:
+        forward_stages = _load_stages_from(config.get_stages_path(), args.stage)
+        if not forward_stages:
+            forward_stages = [stage]
+        horizon = 3
+        n_sim_la = 200
+        all_adjs = state.get("rider_adjustments", {})
+        adj_by_stage = {
+            s.number: all_adjs.get(str(s.number), {})
+            for s in forward_stages[:horizon]
+        }
+        la_results = simulate_lookahead(
+            riders=riders,
+            stages=forward_stages,
+            base_probs=probs,
+            profiles=profiles,
+            adjustments_by_stage=adj_by_stage,
+            horizon=min(horizon, len(forward_stages)),
+            n_sim=n_sim_la,
+        )
+        print("\n" + format_lookahead_table(
+            results=la_results,
+            riders=riders,
+            horizon=min(horizon, len(forward_stages)),
+            n_sim=n_sim_la,
+            my_team=my_team,
+            top=20,
+        ))
 
     # 7. Save probs to state for audit trail
     probs_dict = {
@@ -1038,6 +1182,12 @@ def main() -> None:
     p_validate = sub.add_parser("validate", help="Compare engine deltas vs Holdet API for a settled stage")
     p_validate.add_argument("--stage", type=int, required=True, help="Stage number to validate")
 
+    # lookahead
+    p_lookahead = sub.add_parser("lookahead", help="Project per-rider EV over a multi-stage horizon")
+    p_lookahead.add_argument("--stage", type=int, required=True, help="Starting stage number")
+    p_lookahead.add_argument("--horizon", type=int, default=3, help="Number of stages to project (default: 3)")
+    p_lookahead.add_argument("--top", type=int, default=20, help="Show top N riders (default: 20)")
+
     # adjust
     p_adjust = sub.add_parser("adjust", help="Set/list/clear per-stage rider confidence adjustments")
     p_adjust.add_argument("--stage", type=int, required=True, help="Stage number")
@@ -1058,6 +1208,8 @@ def main() -> None:
         cmd_status(args)
     elif args.command == "validate":
         cmd_validate(args)
+    elif args.command == "lookahead":
+        cmd_lookahead(args)
     elif args.command == "adjust":
         cmd_adjust(args)
 
