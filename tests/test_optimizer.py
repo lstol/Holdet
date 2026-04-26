@@ -1443,3 +1443,109 @@ class TestIntentDoesNotAffectOptimizerPreSession20:
         assert self._squad_from_rec(rec1, ids) == self._squad_from_rec(rec2, ids)
         assert rec1.transfers == rec2.transfers
         assert abs(rec1.expected_value - rec2.expected_value) < 1.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Session 21 — optimizer design invariant + n_sim auto-scaling + lookahead wire
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSession21Optimizer:
+    """Session 21: pure-EV invariant, get_n_sim auto-scaling, lookahead eval_fn wiring."""
+
+    def test_get_n_sim_scales_correctly(self):
+        """get_n_sim returns correct sim count by race position."""
+        from config import get_n_sim
+        assert get_n_sim(3)  == 2000, "≤5 stages remaining → 2000 sims"
+        assert get_n_sim(5)  == 2000, "≤5 stages remaining → 2000 sims"
+        assert get_n_sim(8)  == 1000, "≤10 stages remaining → 1000 sims"
+        assert get_n_sim(10) == 1000, "≤10 stages remaining → 1000 sims"
+        assert get_n_sim(11) == 500,  ">10 stages remaining → 500 sims"
+        assert get_n_sim(15) == 500,  ">10 stages remaining → 500 sims"
+
+    def test_n_sim_auto_scaling_used_in_optimize(self):
+        """optimize() without explicit n_sim uses get_n_sim(stages_remaining)."""
+        import unittest.mock as mock
+        from scoring.optimizer import optimize, RiskProfile
+
+        stage = _flat_stage()
+        riders = [_make_rider(f"R{i}", f"T{i}") for i in range(1, 9)]
+        sim_results = {r.holdet_id: _sprinter_sim(r.holdet_id) for r in riders}
+        my_team = [r.holdet_id for r in riders]
+        probs = {}
+
+        with mock.patch("scoring.optimizer.config.get_n_sim", return_value=42) as mock_get_n_sim:
+            with mock.patch("scoring.optimizer._eval_team") as mock_eval:
+                mock_eval.return_value = TeamSimResult(
+                    team_ids=[], captain_id="R1",
+                    expected_value=100_000,
+                    percentile_10=50_000, percentile_50=100_000,
+                    percentile_80=150_000, percentile_95=200_000,
+                    etapebonus_ev=0, etapebonus_p95=0,
+                    scenario_stats={},
+                )
+                optimize(
+                    riders=riders,
+                    my_team=my_team,
+                    stage=stage,
+                    probs=probs,
+                    sim_results=sim_results,
+                    bank=50_000_000,
+                    risk_profile=RiskProfile.BALANCED,
+                    rank=None,
+                    total_participants=None,
+                    stages_remaining=3,
+                    # n_sim deliberately omitted → should auto-scale
+                )
+            mock_get_n_sim.assert_called_once_with(3)
+
+    def test_lookahead_double_swap_routes_through_eval_fn(self):
+        """optimize(enable_lookahead=True) with next_stage/probs_n1 runs without error."""
+        from scoring.optimizer import optimize, RiskProfile
+        from scoring.probabilities import RiderProb
+
+        stage = _flat_stage()
+        next_stage = Stage(
+            number=6, race="giro_2026", stage_type="mountain",
+            distance_km=150.0, is_ttt=False,
+            start_location="X", finish_location="Y",
+        )
+        riders = [_make_rider(f"R{i}", f"T{i}") for i in range(1, 9)]
+        my_team = [r.holdet_id for r in riders]
+        probs = {
+            r.holdet_id: RiderProb(
+                rider_id=r.holdet_id, stage_number=5,
+                p_win=0.05, p_top3=0.10, p_top10=0.20, p_top15=0.30,
+                p_dnf=0.02,
+            )
+            for r in riders
+        }
+        probs_n1 = {
+            r.holdet_id: RiderProb(
+                rider_id=r.holdet_id, stage_number=6,
+                p_win=0.03, p_top3=0.08, p_top10=0.15, p_top15=0.25,
+                p_dnf=0.03,
+            )
+            for r in riders
+        }
+        sim_results = {r.holdet_id: _sprinter_sim(r.holdet_id) for r in riders}
+
+        rec = optimize(
+            riders=riders,
+            my_team=my_team,
+            stage=stage,
+            probs=probs,
+            sim_results=sim_results,
+            bank=50_000_000,
+            risk_profile=RiskProfile.BALANCED,
+            rank=None,
+            total_participants=None,
+            stages_remaining=5,
+            n_sim=10,
+            enable_lookahead=True,
+            next_stage=next_stage,
+            probs_n1=probs_n1,
+        )
+        # Should produce a valid recommendation without crashing
+        assert rec is not None
+        assert rec.profile == RiskProfile.BALANCED
+        assert len(rec.captain) > 0

@@ -31,6 +31,7 @@ from scoring.probabilities import (
     _rider_type,
 )
 from scoring.rider_profiles import RiderProfile
+from scoring.probability_shaper import ProbabilityContext, apply_probability_shaping
 from scoring.lookahead import simulate_lookahead, format_lookahead_table
 from scoring.odds import cli_odds_input
 from scoring.simulator import simulate_all_riders
@@ -514,28 +515,33 @@ def cmd_brief(args) -> None:
                 print(f"  {f:<24} {before:.2f} → {after:.2f}  ({sign}{abs(after - before):.2f})")
 
     # 1. Generate model priors
-    probs = generate_priors(riders, stage)
+    raw_probs = generate_priors(riders, stage)
 
-    # 2. Optional odds input, then interactive adjustment
+    # 2. Optional odds input, then interactive adjustment (CLI-only flow)
     if getattr(args, "odds", False):
-        probs = cli_odds_input(probs, stage, riders)
-    probs = interactive_adjust(probs, stage, riders)
+        raw_probs = cli_odds_input(raw_probs, stage, riders)
+    raw_probs = interactive_adjust(raw_probs, stage, riders)
 
-    # 2b. Apply stored rider confidence adjustments (ephemeral — not persisted to calibration)
-    adjustments = state.get("rider_adjustments", {}).get(str(args.stage), {})
-    if adjustments:
-        probs = apply_rider_adjustments(probs, adjustments)
-
-    # 2c. Structural rider profiles (static multipliers, not learned parameters)
+    # 2b-2c. Unified probability shaping (replaces scattered apply_* calls)
     profiles_path = config.get_rider_profiles_path()
     profiles_raw: dict = {}
     if os.path.exists(profiles_path):
         with open(profiles_path, encoding="utf-8") as fh:
             profiles_raw = json.load(fh)
     profiles = _resolve_profiles(profiles_raw, riders)
-    if profiles:
-        role_map = {r.holdet_id: _rider_type(r, stage) for r in riders}
-        probs = apply_rider_profiles(probs, profiles, role_map)
+    role_map = {r.holdet_id: _rider_type(r, stage) for r in riders}
+    adjustments = state.get("rider_adjustments", {}).get(str(args.stage), {})
+
+    ctx = ProbabilityContext(
+        stage=stage,
+        rider_profiles=profiles,
+        rider_roles=role_map,
+        rider_adjustments=adjustments,
+        odds_signal=None,
+        intelligence_signals=None,
+        user_expertise_weights=None,
+    )
+    probs, _ = apply_probability_shaping(raw_probs, ctx)
 
     # 3. Simulate team only (fast preview)
     team_riders = [r for r in riders if r.holdet_id in my_team]

@@ -68,3 +68,12 @@ INITIAL_BUDGET = 50_000_000
 # λ=0.85 means next-stage EV is discounted 15% relative to current stage.
 # Overridable via --lambda CLI flag. Do NOT tie to calibration metrics.
 LAMBDA_TRANSFER: float = 0.85
+
+
+def get_n_sim(stages_remaining: int) -> int:
+    """Auto-scale simulation count based on race position."""
+    if stages_remaining <= 5:
+        return 2000
+    if stages_remaining <= 10:
+        return 1000
+    return 500
