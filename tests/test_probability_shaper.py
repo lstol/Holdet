@@ -160,6 +160,103 @@ class TestProbabilityShaper:
             assert 0.0 <= rp.p_win <= 1.0, f"{rid}: p_win out of [0,1]"
             assert 0.0 <= rp.p_top15 <= 1.0, f"{rid}: p_top15 out of [0,1]"
 
+    def test_variance_shaping_stable_reduces_p_win(self):
+        """stable mode: p_win after shaping < p_win before shaping for all riders."""
+        stage = _flat_stage()
+        probs = {
+            "r1": _make_rp("r1", p_win=0.10, p_top3=0.20, p_top10=0.40, p_top15=0.50),
+            "r2": _make_rp("r2", p_win=0.05, p_top3=0.10, p_top10=0.25, p_top15=0.35),
+        }
+        # Use no role/profile influence so variance layer is the only active layer
+        ctx = ProbabilityContext(
+            stage=stage,
+            rider_profiles={},
+            rider_roles={"r1": "domestique", "r2": "domestique"},
+            rider_adjustments={},
+            odds_signal=None,
+            intelligence_signals=None,
+            variance_mode="stable",
+        )
+        shaped, trace = apply_probability_shaping(probs, ctx)
+
+        for rid in probs:
+            assert shaped[rid].p_win < probs[rid].p_win, f"{rid}: stable mode must reduce p_win"
+        assert trace["variance"] == 2
+
+    def test_variance_shaping_aggressive_increases_p_win(self):
+        """aggressive mode: p_win after shaping > p_win before shaping for all riders."""
+        stage = _flat_stage()
+        probs = {
+            "r1": _make_rp("r1", p_win=0.10, p_top3=0.20, p_top10=0.40, p_top15=0.50),
+            "r2": _make_rp("r2", p_win=0.05, p_top3=0.10, p_top10=0.25, p_top15=0.35),
+        }
+        ctx = ProbabilityContext(
+            stage=stage,
+            rider_profiles={},
+            rider_roles={"r1": "domestique", "r2": "domestique"},
+            rider_adjustments={},
+            odds_signal=None,
+            intelligence_signals=None,
+            variance_mode="aggressive",
+        )
+        shaped, trace = apply_probability_shaping(probs, ctx)
+
+        for rid in probs:
+            assert shaped[rid].p_win > probs[rid].p_win, f"{rid}: aggressive mode must increase p_win"
+        assert trace["variance"] == 2
+
+    def test_variance_shaping_preserves_ordering(self):
+        """After variance layer: p_win ≤ p_top3 ≤ p_top10 ≤ p_top15 for all riders."""
+        stage = _flat_stage()
+        probs = {
+            "r1": _make_rp("r1", p_win=0.10, p_top3=0.20, p_top10=0.40, p_top15=0.50),
+            "r2": _make_rp("r2", p_win=0.08, p_top3=0.15, p_top10=0.30, p_top15=0.45),
+        }
+        for mode in ("stable", "aggressive"):
+            ctx = ProbabilityContext(
+                stage=stage,
+                rider_profiles={},
+                rider_roles={"r1": "domestique", "r2": "domestique"},
+                rider_adjustments={},
+                odds_signal=None,
+                intelligence_signals=None,
+                variance_mode=mode,
+            )
+            shaped, _ = apply_probability_shaping(probs, ctx)
+            for rid, rp in shaped.items():
+                assert rp.p_win <= rp.p_top3,  f"{rid} ({mode}): p_win > p_top3"
+                assert rp.p_top3 <= rp.p_top10, f"{rid} ({mode}): p_top3 > p_top10"
+                assert rp.p_top10 <= rp.p_top15, f"{rid} ({mode}): p_top10 > p_top15"
+
+    def test_variance_balanced_is_no_op(self):
+        """balanced mode: probs unchanged (within float tolerance)."""
+        stage = _flat_stage()
+        probs = {
+            "r1": _make_rp("r1", p_win=0.10, p_top3=0.20, p_top10=0.40, p_top15=0.50),
+        }
+        ctx_balanced = ProbabilityContext(
+            stage=stage,
+            rider_profiles={},
+            rider_roles={"r1": "domestique"},
+            rider_adjustments={},
+            odds_signal=None,
+            intelligence_signals=None,
+            variance_mode="balanced",
+        )
+        ctx_default = ProbabilityContext(
+            stage=stage,
+            rider_profiles={},
+            rider_roles={"r1": "domestique"},
+            rider_adjustments={},
+            odds_signal=None,
+            intelligence_signals=None,
+        )
+        shaped_balanced, trace_balanced = apply_probability_shaping(probs, ctx_balanced)
+        shaped_default, _ = apply_probability_shaping(probs, ctx_default)
+
+        assert abs(shaped_balanced["r1"].p_win - shaped_default["r1"].p_win) < 1e-9
+        assert trace_balanced["variance"] == 0
+
     def test_probability_shaper_does_not_mutate_input(self):
         """apply_probability_shaping returns a new dict — original probs unchanged."""
         stage = _flat_stage()

@@ -385,7 +385,13 @@ def _pick_captain(
     rider_map: dict,
     intent: Optional[StageIntent] = None,
 ) -> str:
-    """Select captain per profile rules using per-rider SimResult."""
+    """
+    INTERNAL USE ONLY (Session 22+).
+    For the final captain recommendation shown to the user, see scoring/captain_selector.py.
+    _pick_captain is kept here for squad search — evaluating team EV requires a captain.
+
+    Select captain per profile rules using per-rider SimResult.
+    """
     eligible_ids = [rid for rid in squad_ids if rid in sim_results]
     if not eligible_ids:
         return squad_ids[0] if squad_ids else ""

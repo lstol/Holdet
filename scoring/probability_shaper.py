@@ -9,9 +9,11 @@ Layer order is strict:
   1. Stage-role compatibility multipliers  ← Carapaz fix
   2. Rider profiles (consistency, bias)
   3. Intelligence signals (rider-level overrides)
-  4. Odds / market blending              (optional)
-  5. User expertise overrides            (stub — Session 23)
-  6. Normalization + clamp               (enforced after every layer)
+  3.5. Variance shaping (stable/balanced/aggressive nudge)
+  4. Rider confidence adjustments (expert multipliers)
+  5. Odds / market blending              (optional)
+  6. User expertise overrides            (stub — Session 23)
+  + Normalization + clamp               (enforced after every layer)
 """
 from __future__ import annotations
 
@@ -47,6 +49,7 @@ class ProbabilityContext:
     odds_signal: Optional[dict]            # holdet_id → p_win from market
     intelligence_signals: Optional[dict]   # e.g. {"crosswind_risk": "high"} or {holdet_id: {field: val}}
     user_expertise_weights: Optional[dict] = field(default=None)  # stub — Session 23
+    variance_mode: str = "balanced"        # "stable" | "balanced" | "aggressive"
 
 
 # ── Normalization helper ──────────────────────────────────────────────────────
@@ -130,6 +133,20 @@ def apply_probability_shaping(
                 _add_source(rp, "intelligence")
                 intel_hit += 1
 
+    # ── Layer 3.5: Variance shaping ──────────────────────────────────────────
+    variance_hit = 0
+    if ctx.variance_mode and ctx.variance_mode != "balanced":
+        for rid, rp in result.items():
+            if ctx.variance_mode == "stable":
+                rp.p_win   *= 0.90
+                rp.p_top15 *= 1.05
+            elif ctx.variance_mode == "aggressive":
+                rp.p_win   *= 1.15
+                rp.p_top15 *= 0.95
+            _normalize_rp(rp)
+            _add_source(rp, "variance")
+            variance_hit += 1
+
     # ── Layer 4: Rider confidence adjustments (expert multipliers) ────────────
     # NOTE: rider_adjustments from ctx replace apply_rider_adjustments() calls.
     from scoring.probabilities import MAX_RIDER_ADJUSTMENT
@@ -170,6 +187,7 @@ def apply_probability_shaping(
         "role": len(probs),   # all riders receive a role multiplier (even if 1.0)
         "profile": profile_hit,
         "intelligence": intel_hit,
+        "variance": variance_hit,
         "odds": odds_hit,
         "user": adj_hit,
     }

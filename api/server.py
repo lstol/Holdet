@@ -36,6 +36,7 @@ from scoring.probabilities import generate_priors, save_probs, _rider_roles, _ri
 from scoring.probability_shaper import ProbabilityContext, apply_probability_shaping
 from scoring.simulator import simulate_all_riders, STAGE_SCENARIOS, _resolve_scenarios, simulate_team
 from scoring.optimizer import optimize_all_profiles, suggest_profile, RiskProfile
+from scoring.captain_selector import select_captain
 from scoring.stage_intent import StageIntent, compute_stage_intent, apply_intelligence_signals, INTENT_FIELDS
 from output.tracker import record_stage_accuracy, save_accuracy
 
@@ -233,6 +234,7 @@ class BriefRequest(BaseModel):
     intelligence_signals: Optional[dict] = None   # {"crosswind_risk": "high", ...}
     intelligence_reason: Optional[str] = None
     next_stage_type: Optional[str] = None         # reserved for Session 20
+    variance_mode: str = "balanced"               # "stable" | "balanced" | "aggressive"
 
 
 class TeamRequest(BaseModel):
@@ -407,6 +409,7 @@ def post_brief(req: BriefRequest) -> dict:
         odds_signal=None,
         intelligence_signals=req.intelligence_signals,
         user_expertise_weights=None,
+        variance_mode=req.variance_mode or "balanced",
     )
     probs, prob_shaping_trace = apply_probability_shaping(raw_probs, ctx)
 
@@ -441,6 +444,15 @@ def post_brief(req: BriefRequest) -> dict:
         stages_remaining=stages_remaining,
         scenario_priors=req.scenario_priors,
         intent=intent,
+    )
+
+    # Captain selection (runs after optimizer — uses shaped probs + per-rider sim results)
+    variance_mode = req.variance_mode or "balanced"
+    captain_id, captain_candidates = select_captain(
+        team=my_team,
+        probs=probs,
+        sim_results=all_sims,
+        mode=variance_mode,
     )
 
     # Suggested profile
@@ -505,6 +517,11 @@ def post_brief(req: BriefRequest) -> dict:
         "current_team_ev": round(current_team_ev),
         "stages_remaining": stages_remaining,
         "captain": captain,
+        "captain_recommendation": {
+            "rider_id": captain_id,
+            "mode": variance_mode,
+        },
+        "captain_candidates": captain_candidates,
         "suggested_profile": suggested_profile,
         "suggested_profile_reason": suggested_reason,
         "profiles": _serialize_profiles(recommendations, rider_map),

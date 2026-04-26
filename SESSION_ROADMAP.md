@@ -2,7 +2,7 @@
 # Each session has a clear goal, defined inputs, and a done condition.
 # Do not start a session until the previous session's done condition is met.
 # If debugging becomes circular (3+ failed attempts), stop and bring to Claude.ai.
-# Last updated: 2026-04-26 (Session 21 complete: unified probability shaping + frontend fixes)
+# Last updated: 2026-04-26 (Session 22 complete: variance-aware shaping + captain selector module)
 
 ---
 
@@ -852,23 +852,21 @@ BALANCED on ≥1 real stage, with documented reason.
 
 ---
 
-### Session 22 — Variance-Aware Profiles + Captain System
-**Goal:** Real risk behavior encoded in profiles
+### Session 22 — Variance-Aware Shaping + Captain System ✅ COMPLETE (2026-04-26)
+**Goal:** Variance preference encoded in probability shaping; transparent captain selection module
 
-**What to build:**
-- `_team_metric()` gains variance term:
-  ```python
-  # ANCHOR: penalize variance
-  metric = p10 - 0.2 * std_dev
-  # AGGRESSIVE: reward variance
-  metric = p80 + 0.1 * std_dev
-  ```
-- Captain evaluated inside team sim (shared pool from Session 21)
-- `captain_reasoning` field in `ProfileRecommendation`
-- Note: simulation already encodes correlation implicitly — no explicit
-  correlation computation needed (80% of benefit, free)
+**What was built:**
+- `variance_mode` field on `ProbabilityContext` and `BriefRequest` ("stable" | "balanced" | "aggressive")
+- Layer 3.5 inserted into `apply_probability_shaping()` — nudges p_win and p_top15 after intelligence, before odds
+- `balanced` mode is a strict no-op; `_normalize_rp()` enforced after layer
+- `prob_shaping_trace` includes `"variance"` count
+- `scoring/captain_selector.py` — `select_captain(team, probs, sim_results, mode)` with LAMBDA dict
+- Formula: `score = EV + λ * p_win` (λ = 0.0 / 0.5 / 1.5 for stable/balanced/aggressive)
+- `_pick_captain()` in optimizer marked INTERNAL USE ONLY (not deleted — still used for squad search)
+- `/brief` response: `captain_recommendation` + `captain_candidates` (always top 5 with ev/p_win/score)
+- 9 new tests (4 shaper + 5 captain)
 
-**Target: 486 tests passing (+10)**
+**Tests: 519 passing (+9)**
 
 ---
 
@@ -969,8 +967,8 @@ clean briefing.
 | 19.5          | ✓ complete (2026-04-26)   | Rider-level expert adjustments       | Ephemeral signal injection           | 485   |
 | 19.6          | ✓ complete (2026-04-26)   | Rider identity stabilization layer   | Static profile multipliers           | 491   |
 | 20            | ✓ complete (2026-04-26)   | Identity-aware lookahead EV layer    | Per-rider multi-stage projection     | 502   |
-| 21            | planned                   | Optimizer quality                    | Shared sims, faster, smarter         | ~476  |
-| 22            | planned                   | Variance-aware profiles + captain    | Real risk behavior                   | ~486  |
+| 21            | ✓ complete (2026-04-26)   | Unified probability shaping layer    | All intelligence in one pipeline     | 510   |
+| 22            | ✓ complete (2026-04-26)   | Variance-aware shaping + captain     | Mode-driven nudge + captain module   | 519   |
 | 23            | planned                   | Intelligence + differential picks    | Biggest competitive edge             | ~494  |
 | 24            | planned                   | Hardening + performance              | Production-ready final week          | ~502  |
 | 25            | planned                   | Retrospective + TdF prep             | Season learning, next race           | ~510  |
