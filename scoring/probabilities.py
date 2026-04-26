@@ -454,6 +454,64 @@ def interactive_adjust(
     return current_probs
 
 
+# ── Rider confidence adjustments ─────────────────────────────────────────────
+
+MAX_RIDER_ADJUSTMENT = 0.30   # ±30% cap — cannot flip probabilities
+MAX_ADJUSTED_RIDERS  = 3      # above this, print a warning (do not block)
+
+
+def apply_rider_adjustments(
+    probs: dict[str, "RiderProb"],
+    adjustments: dict[str, float],
+) -> dict[str, "RiderProb"]:
+    """Apply expert multiplier adjustments to individual rider probabilities.
+
+    Rider adjustments are temporary decision inputs, not model updates.
+    Must not modify ROLE_TOP15, scenario priors, or calibration outputs.
+
+    adjustments: {rider_id: multiplier} where multiplier ∈ [-0.30, +0.30]
+    Returns a new probs dict — does not mutate the input.
+
+    NOTE: All probability fields (p_win, p_top3, p_top10, p_top15) receive
+    the same multiplier. This is a simplification — in reality a signal like
+    "good sprint legs" mostly affects p_win/p_top3. A field-weighted
+    adjustment_profile is a future upgrade (not needed now).
+
+    NOTE: No re-normalization is applied after adjustment. Probability mass
+    increases when multiple riders are boosted. This is acceptable because
+    simulation samples outcomes rather than using these as a strict distribution.
+    """
+    import copy
+    result = copy.deepcopy(probs)
+
+    active = {rid: mult for rid, mult in adjustments.items() if rid in result}
+
+    if len(active) > MAX_ADJUSTED_RIDERS:
+        print(
+            f"[WARNING] {len(active)} riders adjusted — above {MAX_ADJUSTED_RIDERS} "
+            f"may reduce model reliability for this stage."
+        )
+
+    for rider_id, raw_mult in active.items():
+        rp = result[rider_id]
+        mult = max(-MAX_RIDER_ADJUSTMENT, min(MAX_RIDER_ADJUSTMENT, raw_mult))
+
+        for field in ("p_win", "p_top3", "p_top10", "p_top15"):
+            base = getattr(rp, field)
+            adjusted = _clamp(base * (1 + mult))
+            rp.manual_overrides[f"rca_{field}"] = base  # rca_ prefix = rider confidence adjustment
+            setattr(rp, field, round(adjusted, 4))
+
+        # Track source as a set to prevent model+odds+user+user accumulation
+        sources = set(rp.source.split("+"))
+        sources.add("user")
+        rp.source = "+".join(sorted(sources))
+
+        result[rider_id] = rp
+
+    return result
+
+
 # ── Persistence ───────────────────────────────────────────────────────────────
 
 def save_probs(

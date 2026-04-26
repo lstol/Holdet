@@ -124,6 +124,12 @@ def parse_validation_log(path: str) -> list[dict]:
 def infer_outcomes(entries: list[dict], riders: list, stages: list) -> list[dict]:
     """Enrich entries with role, stage_type, outcome, scenario.
 
+    CALIBRATION FIREWALL:
+    This function uses actual_delta from validation_log.md only.
+    It must never receive rider-adjusted probabilities as input.
+    apply_rider_adjustments() results are ephemeral — not stored in validation_log.
+    Calibration always computes Brier against ROLE_TOP15[role][stage_type], not adjusted p.
+
     riders — list of Rider objects
     stages — list of Stage objects
     Entries that cannot be matched to a rider or stage are dropped.

@@ -2,7 +2,7 @@
 # Each session has a clear goal, defined inputs, and a done condition.
 # Do not start a session until the previous session's done condition is met.
 # If debugging becomes circular (3+ failed attempts), stop and bring to Claude.ai.
-# Last updated: 2026-04-26 (Session 19-Fixes complete: edge hardening before race day)
+# Last updated: 2026-04-26 (Session 19.5 complete: rider-level expert adjustments)
 
 ---
 
@@ -962,7 +962,8 @@ clean briefing.
 | 17            | planned                   | Live validation + calibration        | Engine confirmed correct             | ~440  |
 | 18            | ✓ complete (2026-04-24)   | ICDL v1 — stage intent               | System understands race meaning      | 458   |
 | 19            | ✓ complete (2026-04-25)   | Calibration pass                     | Data-driven model constants          | 477   |
-| 20            | planned                   | Lookahead optimizer v1               | Non-myopic decisions (now safe)      | ~468  |
+| 19.5          | ✓ complete (2026-04-26)   | Rider-level expert adjustments       | Ephemeral signal injection           | 485   |
+| 20            | planned                   | Lookahead optimizer v1               | Non-myopic decisions (now safe)      | ~495  |
 | 21            | planned                   | Optimizer quality                    | Shared sims, faster, smarter         | ~476  |
 | 22            | planned                   | Variance-aware profiles + captain    | Real risk behavior                   | ~486  |
 | 23            | planned                   | Intelligence + differential picks    | Biggest competitive edge             | ~494  |

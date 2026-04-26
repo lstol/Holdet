@@ -126,6 +126,31 @@ def format_briefing(briefing: BriefingOutput, state: dict) -> str:
         lines.append("")
         lines.append("Transfer candidates marked with * above")
 
+    # 3b. Rider confidence adjustments ────────────────────────────────────────
+    adjusted_riders = [
+        (rid, rp) for rid, rp in briefing.probs.items()
+        if any(k.startswith("rca_") for k in rp.manual_overrides)
+    ]
+    if adjusted_riders:
+        lines.append("")
+        lines.append("RIDER CONFIDENCE ADJUSTMENTS:")
+        for rid, rp in adjusted_riders:
+            r = rider_map.get(rid)
+            name = r.name if r else rid
+            base_win = rp.manual_overrides.get("rca_p_win", rp.p_win)
+            adj_win = rp.p_win
+            delta = adj_win - base_win
+            sign = "+" if delta >= 0 else "−"
+            # Recover original multiplier: adj = base*(1+mult) → mult = adj/base - 1
+            mult_pct = round((adj_win / base_win - 1) * 100) if base_win > 0 else 0
+            mult_sign = "+" if mult_pct >= 0 else ""
+            lines.append(
+                f"  Rider: {name}\n"
+                f"    Base P(win): {base_win:.2%}  →  Adjusted: {adj_win:.2%}"
+                f"  ({mult_sign}{mult_pct:.0f}% manual)\n"
+                f"    Source: {rp.source}"
+            )
+
     lines.append("")
 
     # 4. Profile recommendation table ─────────────────────────────────────────

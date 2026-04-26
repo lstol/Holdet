@@ -2,10 +2,13 @@
 main.py — CLI orchestrator for the Holdet fantasy cycling tool.
 
 Commands:
-    python3 main.py ingest --stage N    fetch riders + team from API
-    python3 main.py brief  --stage N    generate pre-stage briefing
-    python3 main.py settle --stage N    record stage results, score riders
-    python3 main.py status              show team, bank, rank
+    python3 main.py ingest --stage N                   fetch riders + team from API
+    python3 main.py brief  --stage N                   generate pre-stage briefing
+    python3 main.py settle --stage N                   record stage results, score riders
+    python3 main.py status                             show team, bank, rank
+    python3 main.py adjust --stage N --rider X --pct N set rider confidence adjustment
+    python3 main.py adjust --stage N --list            show current adjustments
+    python3 main.py adjust --stage N --clear           clear all adjustments for stage
 """
 from __future__ import annotations
 
@@ -22,7 +25,10 @@ from ingestion.api import get_session, fetch_riders, fetch_my_team, save_riders,
 from scoring.engine import (
     Rider, Stage, StageResult, SprintPoint, KOMPoint, score_rider,
 )
-from scoring.probabilities import generate_priors, interactive_adjust, save_probs
+from scoring.probabilities import (
+    generate_priors, interactive_adjust, save_probs,
+    apply_rider_adjustments, _find_rider,
+)
 from scoring.odds import cli_odds_input
 from scoring.simulator import simulate_all_riders
 from scoring.optimizer import (
@@ -368,6 +374,11 @@ def cmd_brief(args) -> None:
     if getattr(args, "odds", False):
         probs = cli_odds_input(probs, stage, riders)
     probs = interactive_adjust(probs, stage, riders)
+
+    # 2b. Apply stored rider confidence adjustments (ephemeral — not persisted to calibration)
+    adjustments = state.get("rider_adjustments", {}).get(str(args.stage), {})
+    if adjustments:
+        probs = apply_rider_adjustments(probs, adjustments)
 
     # 3. Simulate team only (fast preview)
     team_riders = [r for r in riders if r.holdet_id in my_team]
@@ -885,6 +896,73 @@ def cmd_status(args) -> None:
     print("\n" + format_status(state, riders))
 
 
+# ── adjust subcommand ─────────────────────────────────────────────────────────
+
+def cmd_adjust(args) -> None:
+    """Store, list, or clear per-stage rider confidence adjustments."""
+    state_path = config.get_state_path()
+    riders_path = config.get_riders_path()
+    state = _load_state(state_path)
+    stage_key = str(args.stage)
+
+    adjustments: dict[str, float] = state.setdefault("rider_adjustments", {}).get(stage_key, {})
+
+    # --list
+    if args.list:
+        if not adjustments:
+            print(f"No adjustments set for stage {args.stage}")
+        else:
+            print(f"\n  Stage {args.stage} adjustments:")
+            for rid, mult in adjustments.items():
+                sign = "+" if mult >= 0 else ""
+                print(f"    {rid:<20} {sign}{mult*100:.0f}%")
+        return
+
+    # --clear
+    if args.clear:
+        state.setdefault("rider_adjustments", {})[stage_key] = {}
+        _save_state(state, state_path)
+        print(f"Cleared all adjustments for stage {args.stage}")
+        return
+
+    # --rider + --pct
+    if args.rider is None or args.pct is None:
+        print("Specify --rider and --pct, or --list, or --clear")
+        return
+
+    riders = load_riders(riders_path) if os.path.exists(riders_path) else []
+    riders_by_id = {r.holdet_id: r for r in riders}
+
+    # Build a minimal probs dict for name matching
+    from scoring.probabilities import RiderProb
+    stub_probs = {r.holdet_id: RiderProb(
+        rider_id=r.holdet_id, stage_number=args.stage,
+        p_win=0.0, p_top3=0.0, p_top10=0.0, p_top15=0.0, p_dnf=0.0,
+    ) for r in riders}
+
+    rid = _find_rider(args.rider, stub_probs, riders_by_id)
+    if rid is None:
+        print(f"Rider not found: {args.rider!r}")
+        return
+
+    rider_name = riders_by_id[rid].name if rid in riders_by_id else rid
+    multiplier = args.pct / 100.0
+
+    stage_adj = state.setdefault("rider_adjustments", {}).setdefault(stage_key, {})
+
+    if rid in stage_adj:
+        old_pct = stage_adj[rid] * 100
+        sign_old = "+" if old_pct >= 0 else ""
+        sign_new = "+" if args.pct >= 0 else ""
+        print(f"Overwriting {rider_name}: {sign_old}{old_pct:.0f}% → {sign_new}{args.pct:.0f}%")
+    else:
+        sign = "+" if args.pct >= 0 else ""
+        print(f"Set {rider_name}: {sign}{args.pct:.0f}%")
+
+    stage_adj[rid] = multiplier
+    _save_state(state, state_path)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -917,6 +995,14 @@ def main() -> None:
     p_validate = sub.add_parser("validate", help="Compare engine deltas vs Holdet API for a settled stage")
     p_validate.add_argument("--stage", type=int, required=True, help="Stage number to validate")
 
+    # adjust
+    p_adjust = sub.add_parser("adjust", help="Set/list/clear per-stage rider confidence adjustments")
+    p_adjust.add_argument("--stage", type=int, required=True, help="Stage number")
+    p_adjust.add_argument("--rider", type=str, default=None, help="Rider name fragment (fuzzy match)")
+    p_adjust.add_argument("--pct", type=float, default=None, help="Multiplier percent, e.g. 20 = +20%%")
+    p_adjust.add_argument("--list", action="store_true", help="List current adjustments for this stage")
+    p_adjust.add_argument("--clear", action="store_true", help="Clear all adjustments for this stage")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -929,6 +1015,8 @@ def main() -> None:
         cmd_status(args)
     elif args.command == "validate":
         cmd_validate(args)
+    elif args.command == "adjust":
+        cmd_adjust(args)
 
 
 if __name__ == "__main__":
