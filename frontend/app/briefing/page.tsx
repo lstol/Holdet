@@ -5,6 +5,16 @@ import { AlertTriangle, Zap, RefreshCw, Play, ChevronDown, ChevronUp } from 'luc
 
 const RACE = 'giro_2026'
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+const RIDERS_CACHE_KEY = 'holdet_riders_cache'
+
+// C1: Default scenario priors by stage type — shown before first run
+const STAGE_TYPE_DEFAULTS: Record<string, Record<string, number>> = {
+  flat:     { bunch_sprint: 65, reduced_sprint: 20, breakaway: 15 },
+  hilly:    { bunch_sprint: 25, reduced_sprint: 25, breakaway: 30, gc_day: 20 },
+  mountain: { gc_day: 70, breakaway: 25, reduced_sprint: 5 },
+  itt:      { tt: 100 },
+  ttt:      { ttt: 100 },
+}
 
 function fmt(v: number | null, pct = false) {
   if (v == null) return '—'
@@ -190,14 +200,25 @@ export default function BriefingPage() {
   const [showProfiles, setShowProfiles] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [scenarioPriors, setScenarioPriors] = useState<Record<string, number> | null>(null)
+  const [reSimulating, setReSimulating] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // C4: Restore briefing result AND slider state on mount / tab-switch
   useEffect(() => {
     const stored = localStorage.getItem('holdet_briefing_result')
     if (stored) {
       try {
-        setBriefResult(JSON.parse(stored))
+        const parsed = JSON.parse(stored)
+        setBriefResult(parsed)
         setShowProfiles(true)
+        // Restore slider state from cached result
+        if (parsed.scenario_priors) {
+          const pct = Object.fromEntries(
+            Object.entries(parsed.scenario_priors as Record<string, number>)
+              .map(([k, v]) => [k, Math.round((v as number) * 100)])
+          )
+          setScenarioPriors(pct)
+        }
       } catch {
         // ignore parse errors
       }
@@ -221,7 +242,24 @@ export default function BriefingPage() {
       const currentStage = gameState?.current_stage ?? 1
       const stageData = (stagesRes.data as Stage[])?.find(s => s.number === currentStage)
       setStage(stageData ?? null)
-      setRiders((ridersRes.data as Rider[]) ?? [])
+
+      // C3: Cache riders; fall back to cache if Supabase returns empty
+      const riderList = (ridersRes.data as Rider[]) ?? []
+      if (riderList.length > 0) {
+        localStorage.setItem(RIDERS_CACHE_KEY, JSON.stringify(riderList))
+        setRiders(riderList)
+      } else {
+        const cached = localStorage.getItem(RIDERS_CACHE_KEY)
+        if (cached) { try { setRiders(JSON.parse(cached)) } catch { /* ignore */ } }
+      }
+
+      // C1: Initialize sliders from stage type defaults before first run
+      if (stageData?.stage_type) {
+        setScenarioPriors(prev => {
+          if (prev) return prev  // already set (e.g. from localStorage restore)
+          return STAGE_TYPE_DEFAULTS[stageData.stage_type] ?? null
+        })
+      }
 
       if (gameState) {
         const { data: probData } = await sb
@@ -269,9 +307,16 @@ export default function BriefingPage() {
 
   const runBriefing = useCallback(async (priorsOverride?: Record<string, number> | null) => {
     if (!stage) return
+    // C2: slider re-sims keep old table visible; full runs clear it
+    const isSliderRun = priorsOverride != null
+    if (isSliderRun) {
+      setReSimulating(true)
+    } else {
+      setBriefResult(null)
+      setBriefError(null)
+      setShowProfiles(false)
+    }
     setBriefLoading(true)
-    setBriefError(null)
-    setBriefResult(null)
     try {
       const priors = priorsOverride ?? scenarioPriors
       // Convert percentages to fractions for the API, omit if null
@@ -291,11 +336,11 @@ export default function BriefingPage() {
       const d = await res.json()
       if (!res.ok) throw new Error(d.detail ?? 'Brief failed')
       setBriefResult(d)
-      // Initialize slider state from resolved priors returned by API
-      if (d.scenario_priors && !priors) {
+      // C1: Always update sliders from resolved priors returned by API
+      if (d.scenario_priors) {
         const pct = Object.fromEntries(
           Object.entries(d.scenario_priors as Record<string, number>)
-            .map(([k, v]) => [k, Math.round(v * 100)])
+            .map(([k, v]) => [k, Math.round((v as number) * 100)])
         )
         setScenarioPriors(pct)
       }
@@ -304,6 +349,7 @@ export default function BriefingPage() {
     } catch (e: unknown) {
       setBriefError(e instanceof Error ? e.message : 'Server not running? Start with: bash scripts/start_api.sh')
     } finally {
+      setReSimulating(false)
       setBriefLoading(false)
     }
   }, [stage, lookAhead, captainOverride, scenarioPriors])
@@ -517,6 +563,10 @@ export default function BriefingPage() {
       {/* Briefing result — 4-profile table */}
       {briefResult && (
         <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-4">
+          {reSimulating && (
+            <p className="text-xs text-zinc-500 italic animate-pulse">Re-computing…</p>
+          )}
+          <div className={reSimulating ? 'opacity-50' : ''}>
           {/* team_note banner — shown when no team is selected */}
           {briefResult.team_note && (
             <div className="bg-yellow-950 border border-yellow-700 rounded-lg p-3 flex items-start gap-2">
@@ -710,6 +760,7 @@ export default function BriefingPage() {
               </table>
             </div>
           )}
+          </div>{/* end reSimulating opacity wrapper */}
         </div>
       )}
 

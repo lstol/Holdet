@@ -32,7 +32,8 @@ from ingestion.api import get_session, fetch_riders, fetch_my_team, save_riders,
 from scoring.engine import (
     Rider, Stage, StageResult, SprintPoint, KOMPoint, score_rider,
 )
-from scoring.probabilities import generate_priors, save_probs, _rider_roles
+from scoring.probabilities import generate_priors, save_probs, _rider_roles, _rider_type
+from scoring.probability_shaper import ProbabilityContext, apply_probability_shaping
 from scoring.simulator import simulate_all_riders, STAGE_SCENARIOS, _resolve_scenarios, simulate_team
 from scoring.optimizer import optimize_all_profiles, suggest_profile, RiskProfile
 from scoring.stage_intent import StageIntent, compute_stage_intent, apply_intelligence_signals, INTENT_FIELDS
@@ -118,6 +119,35 @@ def _load_stage(stage_number: int) -> Stage:
             notes=s.get("notes", ""),
         )
     raise HTTPException(status_code=404, detail=f"Stage {stage_number} not found")
+
+
+def _load_profiles() -> dict:
+    path = os.path.join("data", "rider_profiles.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _resolve_profiles(profiles_raw: dict, riders: list) -> dict:
+    """Convert raw JSON dict to {holdet_id: RiderProfile}."""
+    from scoring.rider_profiles import RiderProfile
+    result: dict = {}
+    for rider in riders:
+        rid = rider.holdet_id
+        raw = profiles_raw.get(rid) or profiles_raw.get(rider.name, {})
+        if not raw:
+            continue
+        p = RiderProfile(
+            rider_id=rid,
+            sprint_bias=raw.get("sprint_bias", 1.0),
+            gc_bias=raw.get("gc_bias", 1.0),
+            climb_bias=raw.get("climb_bias", 1.0),
+            consistency=raw.get("consistency", 1.0),
+        )
+        p.clamp()
+        result[rid] = p
+    return result
 
 
 def _resolve_name(fragment: str, rider_map: dict[str, Rider]) -> str:
@@ -348,8 +378,8 @@ def post_brief(req: BriefRequest) -> dict:
 
     rider_map = {r.holdet_id: r for r in riders}
 
-    # Model probs (no interactive adjustment)
-    probs = generate_priors(riders, stage)
+    # Model probs — raw priors before shaping
+    raw_probs = generate_priors(riders, stage)
 
     # Compute stage intent
     gc_positions_raw = state.get("gc_standings", {})
@@ -362,6 +392,23 @@ def post_brief(req: BriefRequest) -> dict:
         if not req.intelligence_reason:
             raise HTTPException(status_code=400, detail="intelligence_reason required when signals provided")
         intent = apply_intelligence_signals(intent, req.intelligence_signals)
+
+    # Build shaping context — single source of truth for roles
+    profiles_raw = _load_profiles()
+    profiles = _resolve_profiles(profiles_raw, riders)
+    role_map = {r.holdet_id: _rider_type(r, stage) for r in riders}
+    adjustments = state.get("rider_adjustments", {}).get(str(req.stage), {})
+
+    ctx = ProbabilityContext(
+        stage=stage,
+        rider_profiles=profiles,
+        rider_roles=role_map,
+        rider_adjustments=adjustments,
+        odds_signal=None,
+        intelligence_signals=req.intelligence_signals,
+        user_expertise_weights=None,
+    )
+    probs, prob_shaping_trace = apply_probability_shaping(raw_probs, ctx)
 
     # Simulate full field for optimizer
     all_sims = simulate_all_riders(
@@ -466,6 +513,7 @@ def post_brief(req: BriefRequest) -> dict:
         "scenario_priors": {k: round(v, 4) for k, v in resolved_scenarios.items()},
         "scenario_stats": {k: round(v, 4) for k, v in realized_scenario_stats.items()},
         "stage_intent": {f: getattr(intent, f) for f in INTENT_FIELDS},
+        "prob_shaping_trace": prob_shaping_trace,
     }
     if not my_team:
         resp["team_note"] = "No team picked yet — showing best team to select from scratch."

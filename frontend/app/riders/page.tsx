@@ -5,6 +5,7 @@ import { RefreshCw } from 'lucide-react'
 
 const RACE = 'giro_2026'
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+const RIDERS_CACHE_KEY = 'holdet_riders_cache'
 
 function fmt(v: number | null) {
   if (v == null) return '—'
@@ -27,6 +28,7 @@ export default function RidersPage() {
   const [sort, setSort] = useState<SortKey>('value')
   const [ingestLoading, setIngestLoading] = useState(false)
   const [ingestMsg, setIngestMsg] = useState<string | null>(null)
+  const [staleWarning, setStaleWarning] = useState(false)
   const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
@@ -38,8 +40,18 @@ export default function RidersPage() {
         sb.from('riders').select('*').eq('user_id', user.id).eq('race', RACE),
         sb.from('game_state').select('*').eq('user_id', user.id).eq('race', RACE).single(),
       ])
+      // C3: Cache riders; fall back to cache if Supabase returns empty
       const riderList = (ridersRes.data as Rider[]) ?? []
-      setRiders(riderList)
+      if (riderList.length > 0) {
+        localStorage.setItem(RIDERS_CACHE_KEY, JSON.stringify(riderList))
+        setRiders(riderList)
+        setStaleWarning(false)
+      } else {
+        const cached = localStorage.getItem(RIDERS_CACHE_KEY)
+        if (cached) {
+          try { setRiders(JSON.parse(cached)); setStaleWarning(true) } catch { /* ignore */ }
+        }
+      }
       setGs(gsRes.data as GameState | null)
       const currentStage = (gsRes.data as GameState | null)?.current_stage ?? 1
       const { data: probData } = await sb
@@ -82,6 +94,16 @@ export default function RidersPage() {
       const d = await res.json()
       if (!res.ok) throw new Error(d.detail ?? 'Ingest failed')
       setIngestMsg(`✓ ${d.riders_count} riders refreshed`)
+      // Re-fetch from Supabase after successful ingest and update cache
+      if (user) {
+        const { data } = await sb.from('riders').select('*').eq('user_id', user.id).eq('race', RACE)
+        const fresh = (data as Rider[]) ?? []
+        if (fresh.length > 0) {
+          localStorage.setItem(RIDERS_CACHE_KEY, JSON.stringify(fresh))
+          setRiders(fresh)
+          setStaleWarning(false)
+        }
+      }
     } catch (e: unknown) {
       setIngestMsg(`✗ ${e instanceof Error ? e.message : 'Server not running?'}`)
     } finally {
@@ -98,6 +120,9 @@ export default function RidersPage() {
 
   return (
     <div className="space-y-4">
+      {staleWarning && (
+        <p className="text-xs text-zinc-500">Showing cached riders — click Refresh Riders to update</p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Riders</h1>
         <div className="flex items-center gap-2">

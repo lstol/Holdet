@@ -8,6 +8,11 @@ Session 15: greedy swap loop is now wired to team-level simulation via
 _eval_team() with memoization. n=500, seed=42 fixed within each optimize()
 call for stable comparisons. Performance note: 400+ unique squad evaluations
 at n=500 can take several minutes — acceptable for a pre-race decision tool.
+
+DESIGN INVARIANT (Session 21+):
+This module is a pure EV maximizer. It consumes probabilities; it never shapes them.
+All probability shaping lives in scoring/probability_shaper.py.
+Any PR that adds role/profile/stage logic here should be rejected.
 """
 from __future__ import annotations
 
@@ -17,6 +22,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+import config
 from config import LAMBDA_TRANSFER
 from scoring.engine import Rider, Stage
 from scoring.probabilities import RiderProb
@@ -307,8 +313,15 @@ def _try_double_swaps(
 
         proposed_t = tuple(sorted(proposed))
         proposed_captain = _pick_captain(proposed, sim_results, profile, rider_map, intent=intent)
-        result = _eval_team(proposed_t, proposed_captain, stage, all_riders, probs, n=n, seed=42, scenario_priors=scenario_priors)
-        if _team_metric(result, profile) > current_metric + threshold:
+        if eval_fn is not None:
+            # eval_fn is a partial of evaluate_action_multistage — returns combined float EV
+            score = eval_fn(proposed_t, proposed_captain, stage, all_riders, probs,
+                            scenario_priors=scenario_priors)
+        else:
+            result = _eval_team(proposed_t, proposed_captain, stage, all_riders, probs,
+                                n=n, seed=42, scenario_priors=scenario_priors)
+            score = _team_metric(result, profile)
+        if score > current_metric + threshold:
             return (proposed, proposed_captain, sell_pair, buy_pair)
 
     return None
@@ -458,7 +471,7 @@ def optimize(
     rank: Optional[int],
     total_participants: Optional[int],
     stages_remaining: int,
-    n_sim: int = 500,
+    n_sim: Optional[int] = None,
     scenario_priors: Optional[dict] = None,
     intent: Optional[StageIntent] = None,
     next_stage: Optional[Stage] = None,
@@ -486,21 +499,20 @@ def optimize(
     _eval_cache.clear()
     _lookahead_cache.clear()
 
-    # _eval closure: routes to single-stage or 2-stage evaluator.
-    # When enable_lookahead=False (default): identical to previous _eval_team calls.
-    # When enable_lookahead=True + next_stage + probs_n1 set: uses evaluate_action_multistage.
-    # Session 21 wires the greedy/double-swap loops to use _eval instead of _eval_team.
-    def _eval(squad_t: tuple, captain_id: str) -> float:
-        if enable_lookahead and next_stage is not None and probs_n1 is not None:
-            return evaluate_action_multistage(
-                squad_t, captain_id, stage, riders, probs,
-                next_stage, probs_n1, intent_n1, n=n_sim,
-            )
-        result = _eval_team(squad_t, captain_id, stage, riders, probs, n=n_sim, seed=42,
-                            scenario_priors=scenario_priors)
-        return _team_metric(result, risk_profile)
+    # Auto-scale simulation count when not explicitly provided
+    if n_sim is None:
+        n_sim = config.get_n_sim(stages_remaining)
 
-    _ = _eval  # referenced by Session 21 — suppress unused-variable warnings
+    # Build eval_fn for double-swap loop: partial of evaluate_action_multistage when
+    # lookahead is active, otherwise None (falls back to _eval_team inside _try_double_swaps).
+    if enable_lookahead and next_stage is not None and probs_n1 is not None:
+        from functools import partial
+        _double_swap_eval_fn = partial(
+            evaluate_action_multistage,
+            next_stage=next_stage, probs_n1=probs_n1, intent_n1=intent_n1, n=LOOKAHEAD_N,
+        )
+    else:
+        _double_swap_eval_fn = None
 
     rider_map: dict = {r.holdet_id: r for r in riders}
 
@@ -699,6 +711,7 @@ def optimize(
         n=n_sim,
         scenario_priors=scenario_priors,
         intent=intent,
+        eval_fn=_double_swap_eval_fn,
     )
     if double_result is not None:
         proposed_squad, proposed_captain, sell_pair, buy_pair = double_result
@@ -836,7 +849,7 @@ def optimize_all_profiles(
     rank: Optional[int],
     total_participants: Optional[int],
     stages_remaining: int,
-    n_sim: int = 500,
+    n_sim: Optional[int] = None,
     scenario_priors: Optional[dict] = None,
     intent: Optional[StageIntent] = None,
     next_stage: Optional[Stage] = None,
