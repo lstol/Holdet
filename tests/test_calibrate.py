@@ -167,6 +167,40 @@ class TestHoldout:
         assert b_after >= b_before  # holdout rejects
 
 
+# ── 4b. Max updates cap ──────────────────────────────────────────────────────
+
+class TestMaxUpdates:
+    def test_max_two_updates_enforced(self, tmp_path):
+        """Third suggestion must be silently skipped even if it would pass holdout."""
+        # 3 distinct (role, stage_type) groups, each with 3 consistent underestimations
+        # (all outcomes=1 → all errors negative → direction="under" → suggestion generated)
+        combos = [
+            ("climber",     "mountain"),
+            ("tt",          "itt"),
+            ("gc_contender","hilly"),
+        ]
+        entries = []
+        for stage_offset, (role, stage_type) in enumerate(combos):
+            for i in range(3):
+                entries.append({
+                    "stage": stage_offset * 10 + i + 1,
+                    "role": role,
+                    "stage_type": stage_type,
+                    "outcome": 1,
+                    "actual_delta": 100,
+                    "rider": f"{role}_{i}",
+                })
+
+        history_path = str(tmp_path / "calibration_history.json")
+        accepted = run_calibration(
+            entries,
+            dry_run=False,
+            history_path=history_path,
+            input_fn=lambda _: "yes",
+        )
+        assert len(accepted) <= 2
+
+
 # ── 5. Dry-run: no write ──────────────────────────────────────────────────────
 
 class TestDryRun:

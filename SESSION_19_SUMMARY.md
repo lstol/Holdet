@@ -1,7 +1,7 @@
 # Session 19 Summary — Calibration Pass
 
-**Date:** 2026-04-25
-**Tests:** 476/476 passing (464 → 476, +12 new)
+**Date:** 2026-04-25 (fixes: 2026-04-26)
+**Tests:** 477/477 passing (464 → 476 in Session 19, +1 in 19-Fixes)
 **Branch:** claude/heuristic-cartwright-4cacf0 → merged to main
 
 ---
@@ -286,6 +286,90 @@ Scaffold note: raw entries from the validation log don't carry `role`/`stage_typ
 | Non-deterministic scenario | Deterministic if/elif chain in `infer_outcomes` |
 | < 3 stages or mixed direction | Guards in `suggest_adjustments` |
 | > 2 updates per run | `len(accepted_changes) >= MAX_UPDATES_PER_RUN` break |
+
+---
+
+## Session 19-Fixes — Edge Hardening Before Race Day
+
+**Date:** 2026-04-26
+**Tests:** 477/477 (+1 new test)
+
+7 targeted fixes — no new features.
+
+### Fix 1 — `test_max_two_updates_enforced` (new test)
+
+`MAX_UPDATES_PER_RUN = 2` was enforced in `run_calibration()` but untested. Added `TestMaxUpdates::test_max_two_updates_enforced` — builds 3 distinct (role, stage_type) groups each with 3 consistent underestimations, passes `input_fn=lambda _: "yes"`, asserts `len(accepted) <= 2`.
+
+### Fix 2 — CLI guard robustness (line ~529)
+
+Old (brittle — misleading when data is partially enriched):
+```python
+if entries and "role" not in entries[0]:
+    print("No validation data yet")
+```
+New (checks all entries, clearer message):
+```python
+if not all("role" in e for e in entries):
+    print("No validation data yet — run after stage results are available")
+    return
+```
+
+### Fix 3 — Canonical field comment in `parse_validation_log`
+
+Added immediately before `return entries`:
+```python
+# Canonical parsed fields:
+#   engine_delta  — Engine column (model's calculated delta)
+#   actual_delta  — Actual column (Holdet API delta)
+# Do NOT rename these downstream. All functions consume engine_delta / actual_delta.
+```
+
+### Fix 4 — winner_role proxy comment in `infer_outcomes`
+
+Added above `winner_entry = max(...)`:
+```python
+# winner_role is inferred as the rider with max(actual_delta) per stage.
+# This is a proxy for stage winner and may misclassify edge cases
+# (e.g. multiple riders with similar deltas, non-winner scoring artifacts).
+```
+
+### Fix 5 — `rolling_last_5` scope comment in `compute_brier_scores`
+
+Added before `return {"overall": ..., "rolling_last_5": ...}`:
+```python
+# rolling_last_5 is computed per (role, stage_type),
+# using only entries whose stage number is in the last 5 unique stages seen.
+# It is NOT a global rolling average.
+```
+
+### Fix 6 — `(inf, inf)` as explicit rejection signal in `evaluate_holdout`
+
+Added above `return float("inf"), float("inf")`:
+```python
+# (inf, inf) signals insufficient data for this (role, stage_type).
+# Caller must treat this as rejection: brier_after < brier_before is False.
+```
+
+### Fix 7 — Rejected-suggestion debug output in interactive mode
+
+When holdout rejects in non-dry-run mode (previously silent):
+```python
+print(f"[DEBUG] Rejected {suggestion.role.upper()}-{suggestion.stage_type} "
+      f"— holdout failed ({brier_before:.4f} → {brier_after:.4f})")
+```
+
+When max-updates cap is hit:
+```python
+print(f"[DEBUG] Max updates ({MAX_UPDATES_PER_RUN}) reached — remaining suggestions skipped")
+```
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `scripts/calibrate.py` | Fixes 2–7 (guard, 4 doc comments, 2 debug prints) |
+| `tests/test_calibrate.py` | Fix 1 — `TestMaxUpdates::test_max_two_updates_enforced` |
+| `SESSION_19_SUMMARY.md` | This section |
 
 ---
 

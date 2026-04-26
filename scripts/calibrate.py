@@ -112,6 +112,10 @@ def parse_validation_log(path: str) -> list[dict]:
             except (ValueError, IndexError):
                 continue  # malformed row — skip silently
 
+    # Canonical parsed fields:
+    #   engine_delta  — Engine column (model's calculated delta)
+    #   actual_delta  — Actual column (Holdet API delta)
+    # Do NOT rename these downstream. All functions consume engine_delta / actual_delta.
     return entries
 
 
@@ -157,6 +161,9 @@ def infer_outcomes(entries: list[dict], riders: list, stages: list) -> list[dict
 
     result = []
     for stage_num, stage_ents in stage_entries.items():
+        # winner_role is inferred as the rider with max(actual_delta) per stage.
+        # This is a proxy for stage winner and may misclassify edge cases
+        # (e.g. multiple riders with similar deltas, non-winner scoring artifacts).
         winner_entry = max(stage_ents, key=lambda e: e.get("actual_delta", 0))
         winner_role = winner_entry["role"]
         stage_type = winner_entry["stage_type"]
@@ -218,6 +225,9 @@ def compute_brier_scores(entries: list[dict]) -> dict:
         last_5 = [b for _, b in sorted_pairs[-5:]]
         rolling[key] = mean(last_5)
 
+    # rolling_last_5 is computed per (role, stage_type),
+    # using only entries whose stage number is in the last 5 unique stages seen.
+    # It is NOT a global rolling average.
     return {"overall": overall, "rolling_last_5": rolling}
 
 
@@ -327,6 +337,8 @@ def evaluate_holdout(entries: list[dict], suggestion: Suggestion) -> tuple[float
         if e.get("role") == suggestion.role and e.get("stage_type") == suggestion.stage_type
     ]
     if not relevant:
+        # (inf, inf) signals insufficient data for this (role, stage_type).
+        # Caller must treat this as rejection: brier_after < brier_before is False.
         return float("inf"), float("inf")
 
     unique_stages = sorted(set(e["stage"] for e in relevant))
@@ -458,6 +470,7 @@ def run_calibration(
 
     for suggestion in suggestions:
         if len(accepted_changes) >= MAX_UPDATES_PER_RUN:
+            print(f"[DEBUG] Max updates ({MAX_UPDATES_PER_RUN}) reached — remaining suggestions skipped")
             break
 
         brier_before, brier_after = evaluate_holdout(entries, suggestion)
@@ -472,6 +485,8 @@ def run_calibration(
             continue
 
         if not accepted:
+            print(f"[DEBUG] Rejected {suggestion.role.upper()}-{suggestion.stage_type} "
+                  f"— holdout failed ({brier_before:.4f} → {brier_after:.4f})")
             continue
 
         print(f"\nRole: {suggestion.role.upper()} ({suggestion.stage_type})")
@@ -525,9 +540,9 @@ def main() -> None:
         return
 
     # Entries from the log don't carry role/stage_type — need infer_outcomes with real riders.
-    # In scaffold mode (no riders loaded), check if entries are pre-enriched.
-    if entries and "role" not in entries[0]:
-        print("No validation data yet")
+    # In scaffold mode (no riders loaded), check if all entries are pre-enriched.
+    if not all("role" in e for e in entries):
+        print("No validation data yet — run after stage results are available")
         return
 
     run_calibration(entries, dry_run=args.dry_run)
