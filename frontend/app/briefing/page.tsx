@@ -250,20 +250,36 @@ function DecisionTraceInspector({
   trace,
   riderNameMap,
   candidates,
+  captainRiderId,
+  baselineTrace,
+  baselineCandidates,
+  baselineCaptainRiderId,
 }: {
   trace: DecisionTrace
   riderNameMap: Record<string, string>
   candidates: CaptainCandidate[]
+  captainRiderId?: string
+  baselineTrace?: DecisionTrace
+  baselineCandidates?: CaptainCandidate[]
+  baselineCaptainRiderId?: string
 }) {
   // Trace validity gate
   if (trace.trace_version !== '22.5') return null
 
+  const comparisonActive = baselineTrace != null && baselineTrace.trace_version === '22.5'
+
   const [open, setOpen] = useState(false)
   const [openSection, setOpenSection] = useState<Record<string, boolean>>({
     riders: true, captain: true, flip: true, contributors: true,
+    cmp_riders: true, cmp_captain: true, cmp_candidates: true, cmp_flip: true, cmp_contributors: true,
   })
   const toggleSection = (key: string) =>
     setOpenSection(prev => ({ ...prev, [key]: !prev[key] }))
+
+  function cmpDelta(curr: number | null | undefined, base: number | null | undefined): number | null {
+    if (curr == null || base == null) return null
+    return curr - base
+  }
 
   // C.1 — sort riders by final_ev desc, rider_id asc as tie-breaker
   const sortedRiders = Object.entries(trace.riders).sort(([idA, a], [idB, b]) => {
@@ -505,6 +521,258 @@ function DecisionTraceInspector({
             )}
           </div>
 
+          {/* ── B.1–B.5 Comparison sections (22.7) ──────────────────────── */}
+          {comparisonActive && baselineTrace && (
+            <>
+              {/* B.1 Rider EV delta */}
+              <div className="p-4 space-y-2">
+                <button
+                  onClick={() => toggleSection('cmp_riders')}
+                  className="flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-200 uppercase tracking-wide"
+                >
+                  {openSection.cmp_riders ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  Rider EV Δ (current vs baseline)
+                </button>
+                {openSection.cmp_riders && (
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full text-xs font-mono">
+                      <thead className="sticky top-0 bg-zinc-900">
+                        <tr className="border-b border-zinc-700 text-zinc-500">
+                          <th className="text-left py-1.5 pr-3">Rider</th>
+                          <th className="text-right py-1.5 px-2">current</th>
+                          <th className="text-right py-1.5 px-2">baseline</th>
+                          <th className="text-right py-1.5 pl-2">Δ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedRiders
+                          .filter(([rid]) => rid in baselineTrace.riders)
+                          .map(([rid, rt]) => {
+                            const bt = baselineTrace.riders[rid]
+                            const delta = cmpDelta(rt.final_ev, bt?.final_ev)
+                            return (
+                              <tr key={rid} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
+                                <td className="py-1 pr-3 text-zinc-300 font-sans">{name(rid)}</td>
+                                <td className="py-1 px-2 text-right text-orange-400">{fmtK(rt.final_ev)}</td>
+                                <td className="py-1 px-2 text-right text-zinc-400">{bt?.final_ev != null ? fmtK(bt.final_ev) : '—'}</td>
+                                <td className={`py-1 pl-2 text-right font-semibold ${deltaColor(delta)}`}>
+                                  {fmtK(delta)}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* B.2 Captain comparison */}
+              {trace.captain_trace && baselineTrace.captain_trace && (
+                <div className="p-4 space-y-2">
+                  <button
+                    onClick={() => toggleSection('cmp_captain')}
+                    className="flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-200 uppercase tracking-wide"
+                  >
+                    {openSection.cmp_captain ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    Captain Δ (current vs baseline)
+                  </button>
+                  {openSection.cmp_captain && (
+                    <div className="space-y-2 text-xs font-mono">
+                      {captainRiderId !== baselineCaptainRiderId ? (
+                        <p className="text-yellow-400">
+                          ⚠ Captain changed: {name(baselineCaptainRiderId ?? '?')} → {name(captainRiderId ?? '?')}
+                        </p>
+                      ) : captainRiderId ? (
+                        <p className="text-zinc-400">Captain: {name(captainRiderId)}</p>
+                      ) : null}
+                      <table className="text-xs w-full max-w-xs">
+                        <thead>
+                          <tr className="text-zinc-600 border-b border-zinc-800">
+                            <th className="text-left py-1">metric</th>
+                            <th className="text-right py-1 px-2">current</th>
+                            <th className="text-right py-1 px-2">baseline</th>
+                            <th className="text-right py-1">Δ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="border-b border-zinc-800/40">
+                            <td className="py-1 text-zinc-400">final_score</td>
+                            <td className="py-1 px-2 text-right text-orange-400">
+                              {fmtK(trace.captain_trace.final_score)}
+                            </td>
+                            <td className="py-1 px-2 text-right text-zinc-400">
+                              {fmtK(baselineTrace.captain_trace.final_score)}
+                            </td>
+                            {(() => {
+                              const d = cmpDelta(trace.captain_trace.final_score, baselineTrace.captain_trace.final_score)
+                              return (
+                                <td className={`py-1 text-right font-semibold ${deltaColor(d)}`}>
+                                  {fmtK(d)}
+                                </td>
+                              )
+                            })()}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* B.3 Candidate comparison */}
+              {candidates.length > 0 && baselineCandidates && baselineCandidates.length > 0 && (
+                <div className="p-4 space-y-2">
+                  <button
+                    onClick={() => toggleSection('cmp_candidates')}
+                    className="flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-200 uppercase tracking-wide"
+                  >
+                    {openSection.cmp_candidates ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    Candidate Score Δ (current vs baseline)
+                  </button>
+                  {openSection.cmp_candidates && (
+                    <div className="overflow-x-auto">
+                      <table className="text-xs w-full max-w-sm font-mono">
+                        <thead>
+                          <tr className="text-zinc-600 border-b border-zinc-800">
+                            <th className="text-left py-1">Rider</th>
+                            <th className="text-right py-1 px-2">current</th>
+                            <th className="text-right py-1 px-2">baseline</th>
+                            <th className="text-right py-1">Δ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {candidates
+                            .filter(c => baselineCandidates!.some(bc => bc.rider_id === c.rider_id))
+                            .map(c => {
+                              const bc = baselineCandidates!.find(bc => bc.rider_id === c.rider_id)!
+                              const delta = cmpDelta(c.score, bc.score)
+                              return (
+                                <tr key={c.rider_id} className="border-b border-zinc-800/40">
+                                  <td className="py-1 font-sans text-zinc-300">{name(c.rider_id)}</td>
+                                  <td className="py-1 px-2 text-right text-orange-400 tabular-nums">
+                                    {c.score.toLocaleString('da-DK', { maximumFractionDigits: 1 })}
+                                  </td>
+                                  <td className="py-1 px-2 text-right text-zinc-400 tabular-nums">
+                                    {bc.score.toLocaleString('da-DK', { maximumFractionDigits: 1 })}
+                                  </td>
+                                  <td className={`py-1 text-right font-semibold ${deltaColor(delta)}`}>
+                                    {fmtK(delta)}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* B.4 Flip threshold comparison */}
+              {trace.flip_threshold && baselineTrace.flip_threshold && (
+                <div className="p-4 space-y-2">
+                  <button
+                    onClick={() => toggleSection('cmp_flip')}
+                    className="flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-200 uppercase tracking-wide"
+                  >
+                    {openSection.cmp_flip ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    Flip Threshold Δ (current vs baseline)
+                  </button>
+                  {openSection.cmp_flip && (
+                    <div className="space-y-2 text-xs font-mono">
+                      <p className="text-zinc-400">
+                        A: {name(trace.flip_threshold.a)}
+                        <span className="text-zinc-600 mx-2">·</span>
+                        B: {name(trace.flip_threshold.b)}
+                      </p>
+                      <table className="text-xs w-full max-w-xs">
+                        <thead>
+                          <tr className="text-zinc-600 border-b border-zinc-800">
+                            <th className="text-left py-1">metric</th>
+                            <th className="text-right py-1 px-2">current</th>
+                            <th className="text-right py-1 px-2">baseline</th>
+                            <th className="text-right py-1">Δ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="border-b border-zinc-800/40">
+                            <td className="py-1 text-zinc-400">score_gap</td>
+                            <td className={`py-1 px-2 text-right ${deltaColor(trace.flip_threshold.score_gap)}`}>
+                              {trace.flip_threshold.score_gap > 0 ? '+' : ''}{trace.flip_threshold.score_gap.toLocaleString('da-DK', { maximumFractionDigits: 2 })}
+                            </td>
+                            <td className={`py-1 px-2 text-right ${deltaColor(baselineTrace.flip_threshold.score_gap)}`}>
+                              {baselineTrace.flip_threshold.score_gap > 0 ? '+' : ''}{baselineTrace.flip_threshold.score_gap.toLocaleString('da-DK', { maximumFractionDigits: 2 })}
+                            </td>
+                            {(() => {
+                              const d = cmpDelta(trace.flip_threshold.score_gap, baselineTrace.flip_threshold.score_gap)
+                              return (
+                                <td className={`py-1 text-right font-semibold ${deltaColor(d)}`}>
+                                  {fmtK(d)}
+                                </td>
+                              )
+                            })()}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* B.5 Contributors comparison (rider only, max 3) */}
+              {trace.contributors?.rider_contributors?.length > 0 &&
+               baselineTrace.contributors?.rider_contributors?.length > 0 && (
+                <div className="p-4 space-y-2">
+                  <button
+                    onClick={() => toggleSection('cmp_contributors')}
+                    className="flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-200 uppercase tracking-wide"
+                  >
+                    {openSection.cmp_contributors ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    Contributor Share Δ (current vs baseline)
+                  </button>
+                  {openSection.cmp_contributors && (
+                    <div className="overflow-x-auto">
+                      <table className="text-xs w-full max-w-xs">
+                        <thead>
+                          <tr className="text-zinc-600 border-b border-zinc-800">
+                            <th className="text-left py-1">Rider</th>
+                            <th className="text-right py-1 px-2">current</th>
+                            <th className="text-right py-1 px-2">baseline</th>
+                            <th className="text-right py-1">Δ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {trace.contributors.rider_contributors
+                            .slice(0, 3)
+                            .filter(c => baselineTrace.contributors?.rider_contributors?.some(bc => bc.label === c.label))
+                            .map(c => {
+                              const bc = baselineTrace.contributors?.rider_contributors?.find(bc => bc.label === c.label)
+                              const delta = cmpDelta(c.share, bc?.share)
+                              return (
+                                <tr key={c.label} className="border-b border-zinc-800/40">
+                                  <td className="py-1 text-zinc-300">{c.label}</td>
+                                  <td className="py-1 px-2 text-right text-orange-400 tabular-nums">
+                                    {Math.round(c.share * 100)}%
+                                  </td>
+                                  <td className="py-1 px-2 text-right text-zinc-400 tabular-nums">
+                                    {bc ? `${Math.round(bc.share * 100)}%` : '—'}
+                                  </td>
+                                  <td className={`py-1 text-right font-semibold ${deltaColor(delta)}`}>
+                                    {delta == null ? '—' : `${delta > 0 ? '+' : ''}${Math.round(delta * 100)}pp`}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
         </div>
       )}
     </div>
@@ -528,6 +796,7 @@ export default function BriefingPage() {
   const [briefLoading, setBriefLoading] = useState(false)
   const [ingestLoading, setIngestLoading] = useState(false)
   const [briefResult, setBriefResult] = useState<BriefResult | null>(null)
+  const [baselineBrief, setBaselineBrief] = useState<BriefResult | null>(null)
   const [briefError, setBriefError] = useState<string | null>(null)
   const [ingestMsg, setIngestMsg] = useState<string | null>(null)
   const [showProfiles, setShowProfiles] = useState(false)
@@ -1097,14 +1366,46 @@ export default function BriefingPage() {
         </div>
       )}
 
-      {/* Decision Trace Inspector */}
-      {briefResult?.decision_trace && (
-        <DecisionTraceInspector
-          trace={briefResult.decision_trace}
-          riderNameMap={Object.fromEntries(riders.map(r => [r.holdet_id, r.name]))}
-          candidates={briefResult.captain_candidates ?? []}
-        />
-      )}
+      {/* Decision Trace Inspector — baseline controls + comparison banner */}
+      {briefResult?.decision_trace && (() => {
+        const comparisonActive =
+          briefResult.decision_trace?.trace_version === '22.5' &&
+          baselineBrief?.decision_trace?.trace_version === '22.5'
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setBaselineBrief(briefResult)}
+                className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded text-xs font-medium transition-colors"
+              >
+                {baselineBrief !== null ? 'Baseline set ✓' : 'Set as baseline'}
+              </button>
+              {baselineBrief !== null && (
+                <button
+                  onClick={() => setBaselineBrief(null)}
+                  className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded text-xs font-medium transition-colors"
+                >
+                  Clear comparison
+                </button>
+              )}
+            </div>
+            {comparisonActive && (
+              <p className="text-xs text-zinc-400">
+                Comparison mode active — showing current vs baseline
+              </p>
+            )}
+            <DecisionTraceInspector
+              trace={briefResult.decision_trace}
+              riderNameMap={Object.fromEntries(riders.map(r => [r.holdet_id, r.name]))}
+              candidates={briefResult.captain_candidates ?? []}
+              captainRiderId={briefResult.captain_recommendation?.rider_id}
+              baselineTrace={comparisonActive ? baselineBrief?.decision_trace : undefined}
+              baselineCandidates={comparisonActive ? (baselineBrief?.captain_candidates ?? []) : undefined}
+              baselineCaptainRiderId={comparisonActive ? baselineBrief?.captain_recommendation?.rider_id : undefined}
+            />
+          </div>
+        )
+      })()}
 
       {/* Gather Intelligence */}
       <div className="space-y-3">

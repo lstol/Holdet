@@ -2,7 +2,7 @@
 # Each session has a clear goal, defined inputs, and a done condition.
 # Do not start a session until the previous session's done condition is met.
 # If debugging becomes circular (3+ failed attempts), stop and bring to Claude.ai.
-# Last updated: 2026-04-26 (Session 22.6 complete: frontend trace inspector panel)
+# Last updated: 2026-04-26 (Session 22.7 complete: trace comparison & strategy evaluation layer)
 
 ---
 
@@ -886,6 +886,26 @@ BALANCED on ≥1 real stage, with documented reason.
 
 ---
 
+### Session 22.7 — Trace Comparison & Strategy Evaluation Layer ✅ COMPLETE (2026-04-26)
+**Goal:** Side-by-side comparison of two optimizer outputs — pure arithmetic on already-computed outputs
+
+**What was built:**
+- `baselineBrief` React state added alongside `briefResult` (no localStorage, resets on navigation)
+- `comparisonActive` gated on both sides having `trace_version === "22.5"`
+- "Set as baseline" / "Clear comparison" buttons above the inspector panel
+- Comparison mode banner: "Comparison mode active — showing current vs baseline"
+- B.1: Rider EV delta table (intersection only, sorted by current final_ev, no totals)
+- B.2: Captain comparison — final_score diff only, captain change indicator when captains differ
+- B.3: Candidate comparison — current run order preserved, intersection only, max 5
+- B.4: Flip threshold comparison — hidden when missing from either side
+- B.5: Contributor share comparison — rider only, max 3, aligned by exact label match
+- No percentages, no aggregation, no causal language, no recomputation anywhere
+- All comparison sections use blue accent headings to visually distinguish from non-comparison sections
+
+**Tests: 526 passing (unchanged — no backend changes)**
+
+---
+
 ## Phase 4 — Competitive Edge Layer (Sessions 23–25)
 
 ### Session 23 — Intelligence Automation + Differential Picks
@@ -987,6 +1007,7 @@ clean briefing.
 | 22            | ✓ complete (2026-04-26)   | Variance-aware shaping + captain     | Mode-driven nudge + captain module   | 519   |
 | 22.5          | ✓ complete (2026-04-26)   | Decision traceability layer          | Ablation + contributor + trace API   | 526   |
 | 22.6          | ✓ complete (2026-04-26)   | Frontend trace inspector panel       | Trace data visible in briefing UI    | 449   |
+| 22.7          | ✓ complete (2026-04-26)   | Trace comparison & strategy eval     | Side-by-side run comparison in UI    | 526   |
 | 23            | planned                   | Intelligence + differential picks    | Biggest competitive edge             | ~494  |
 | 24            | planned                   | Hardening + performance              | Production-ready final week          | ~502  |
 | 25            | planned                   | Retrospective + TdF prep             | Season learning, next race           | ~510  |
