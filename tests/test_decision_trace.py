@@ -174,12 +174,17 @@ class TestDecisionTrace:
 
         _, _, _, flip_threshold = select_captain(team, probs, sim_results, mode="balanced")
 
+        rider_a_id, rider_b_id = "a", "b"
         expected_D = (ev_a - ev_b) + lam * (p_win_a - p_win_b)
         assert flip_threshold is not None
         assert abs(flip_threshold["score_gap"] - expected_D) < 1e-9, (
             f"score_gap {flip_threshold['score_gap']} != expected {expected_D}"
         )
         assert flip_threshold["interpretation"] == "A wins if score_gap > 0"
+        assert "a" in flip_threshold
+        assert "b" in flip_threshold
+        assert flip_threshold["a"] == rider_a_id
+        assert flip_threshold["b"] == rider_b_id
 
     def test_captain_trace_has_exactly_three_numeric_components(self):
         """captain_trace has exactly ev_component, p_win_component, final_score (plus mode + lambda)."""

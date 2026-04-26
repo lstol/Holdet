@@ -140,6 +140,57 @@ type TeamSim = {
   p_positive: number
 }
 
+// ── Decision Trace types (Session 22.5 contract) ────────────────────────────
+
+type RiderTrace = {
+  base_ev: number
+  probability_adjustment: number
+  variance_adjustment: number
+  intent_adjustment: number   // always 0.0 in 22.5 — column omitted in UI
+  lookahead_adjustment: number
+  final_ev: number
+}
+
+type CaptainCandidate = {
+  rider_id: string
+  ev: number
+  p_win: number
+  score: number
+}
+
+type CaptainTrace = {
+  mode: string
+  lambda: number
+  ev_component: number
+  p_win_component: number
+  final_score: number
+}
+
+type FlipThreshold = {
+  score_gap: number
+  interpretation: string
+  a: string
+  b: string
+}
+
+type Contributor = {
+  label: string
+  share: number
+}
+
+type DecisionTrace = {
+  riders: Record<string, RiderTrace>
+  captain_trace: CaptainTrace
+  flip_threshold?: FlipThreshold
+  contributors: {
+    rider_contributors: Contributor[]
+    scenario_contributions?: Contributor[]
+  }
+  trace_version: string
+}
+
+// ── BriefResult ───────────────────────────────────────────────────────────────
+
 type BriefResult = {
   stage_number: number
   stage_type: string
@@ -156,6 +207,9 @@ type BriefResult = {
   scenario_priors: Record<string, number> | null
   scenario_stats: Record<string, number> | null
   team_note: string | null
+  decision_trace?: DecisionTrace
+  captain_candidates?: CaptainCandidate[]
+  captain_recommendation?: { rider_id: string; mode: string }
 }
 
 function parseJsonField(val: unknown): string[] {
@@ -176,6 +230,285 @@ const PROFILE_COLOURS: Record<string, string> = {
   balanced:   'text-green-400',
   aggressive: 'text-orange-400',
   all_in:     'text-red-400',
+}
+
+// ── Decision Trace helpers ────────────────────────────────────────────────────
+
+function deltaColor(v: number | null | undefined): string {
+  if (v == null || v === 0) return 'text-zinc-500'
+  return v > 0 ? 'text-green-400' : 'text-red-400'
+}
+
+function fmtDelta(v: number | null | undefined): string {
+  if (v == null) return '—'
+  return v === 0 ? '0k' : fmtK(v)
+}
+
+// ── DecisionTraceInspector component ─────────────────────────────────────────
+
+function DecisionTraceInspector({
+  trace,
+  riderNameMap,
+  candidates,
+}: {
+  trace: DecisionTrace
+  riderNameMap: Record<string, string>
+  candidates: CaptainCandidate[]
+}) {
+  // Trace validity gate
+  if (trace.trace_version !== '22.5') return null
+
+  const [open, setOpen] = useState(false)
+  const [openSection, setOpenSection] = useState<Record<string, boolean>>({
+    riders: true, captain: true, flip: true, contributors: true,
+  })
+  const toggleSection = (key: string) =>
+    setOpenSection(prev => ({ ...prev, [key]: !prev[key] }))
+
+  // C.1 — sort riders by final_ev desc, rider_id asc as tie-breaker
+  const sortedRiders = Object.entries(trace.riders).sort(([idA, a], [idB, b]) => {
+    if (b.final_ev !== a.final_ev) return b.final_ev - a.final_ev
+    return idA < idB ? -1 : 1
+  })
+
+  const name = (id: string) => riderNameMap[id] ?? id
+
+  return (
+    <div className="bg-zinc-900 rounded-xl border border-zinc-800">
+      {/* Panel toggle */}
+      <button
+        onClick={() => setOpen(p => !p)}
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-zinc-300 hover:text-white"
+      >
+        <span>Decision Trace Inspector</span>
+        {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+
+      {open && (
+        <div className="border-t border-zinc-800 divide-y divide-zinc-800/50">
+
+          {/* ── C.1 Riders ──────────────────────────────────────────────── */}
+          <div className="p-4 space-y-2">
+            <button
+              onClick={() => toggleSection('riders')}
+              className="flex items-center gap-1 text-xs font-semibold text-zinc-400 hover:text-zinc-200 uppercase tracking-wide"
+            >
+              {openSection.riders ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              Riders (by final EV)
+            </button>
+            {openSection.riders && (
+              <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                <table className="w-full text-xs font-mono">
+                  <thead className="sticky top-0 bg-zinc-900">
+                    <tr className="border-b border-zinc-700 text-zinc-500">
+                      <th className="text-left py-1.5 pr-3">Rider</th>
+                      <th className="text-right py-1.5 px-2">base_ev</th>
+                      <th className="text-right py-1.5 px-2">prob_adj</th>
+                      <th className="text-right py-1.5 px-2">var_adj</th>
+                      <th className="text-right py-1.5 px-2">la_adj</th>
+                      <th className="text-right py-1.5 pl-2">final_ev</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedRiders.map(([rid, rt]) => (
+                      <tr key={rid} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
+                        <td className="py-1 pr-3 text-zinc-300 font-sans">{name(rid)}</td>
+                        <td className="py-1 px-2 text-right text-zinc-400">{fmtDelta(rt.base_ev)}</td>
+                        <td className={`py-1 px-2 text-right ${deltaColor(rt.probability_adjustment)}`}>
+                          {fmtDelta(rt.probability_adjustment)}
+                        </td>
+                        <td className={`py-1 px-2 text-right ${deltaColor(rt.variance_adjustment)}`}>
+                          {fmtDelta(rt.variance_adjustment)}
+                        </td>
+                        <td className={`py-1 px-2 text-right ${deltaColor(rt.lookahead_adjustment)}`}>
+                          {fmtDelta(rt.lookahead_adjustment)}
+                        </td>
+                        <td className="py-1 pl-2 text-right text-orange-400 font-semibold">
+                          {fmtDelta(rt.final_ev)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── C.2 Captain decision ─────────────────────────────────────── */}
+          <div className="p-4 space-y-2">
+            <button
+              onClick={() => toggleSection('captain')}
+              className="flex items-center gap-1 text-xs font-semibold text-zinc-400 hover:text-zinc-200 uppercase tracking-wide"
+            >
+              {openSection.captain ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              Captain Decision
+            </button>
+            {openSection.captain && trace.captain_trace && (
+              <div className="space-y-3">
+                <div className="text-xs text-zinc-400 font-mono space-y-0.5">
+                  <p>
+                    <span className="text-zinc-500">Mode:</span>{' '}
+                    <span className="text-zinc-200">{trace.captain_trace.mode}</span>
+                    <span className="mx-3 text-zinc-600">|</span>
+                    <span className="text-zinc-500">λ:</span>{' '}
+                    <span className="text-zinc-200">{trace.captain_trace.lambda}</span>
+                  </p>
+                  <p>
+                    <span className="text-zinc-500 inline-block w-28">EV component:</span>
+                    <span className="text-zinc-200">{trace.captain_trace.ev_component.toLocaleString('da-DK')}</span>
+                  </p>
+                  <p>
+                    <span className="text-zinc-500 inline-block w-28">p_win component:</span>
+                    <span className="text-zinc-200">{trace.captain_trace.p_win_component.toFixed(4)}</span>
+                  </p>
+                  <p className="border-t border-zinc-800 pt-1">
+                    <span className="text-zinc-500 inline-block w-28">Final score:</span>
+                    <span className="text-orange-400 font-semibold">{trace.captain_trace.final_score.toLocaleString('da-DK')}</span>
+                  </p>
+                </div>
+
+                {/* Candidates — backend order, no re-ranking */}
+                {candidates.length > 0 && (
+                  <div>
+                    <p className="text-xs text-zinc-500 mb-1">── Candidates ──</p>
+                    <table className="text-xs w-full max-w-xs font-mono">
+                      <thead>
+                        <tr className="text-zinc-600 border-b border-zinc-800">
+                          <th className="text-left py-1">Rider</th>
+                          <th className="text-right py-1 px-2">EV</th>
+                          <th className="text-right py-1 px-2">p_win</th>
+                          <th className="text-right py-1">Score</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {candidates.map((c, i) => (
+                          <tr key={c.rider_id} className={`border-b border-zinc-800/40 ${i === 0 ? 'text-orange-400' : 'text-zinc-300'}`}>
+                            <td className="py-1 font-sans">{name(c.rider_id)}</td>
+                            <td className="py-1 px-2 text-right tabular-nums">{fmtK(c.ev)}</td>
+                            <td className="py-1 px-2 text-right tabular-nums">{(c.p_win * 100).toFixed(1)}%</td>
+                            <td className="py-1 text-right tabular-nums">{c.score.toLocaleString('da-DK', { maximumFractionDigits: 1 })}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── C.3 Flip sensitivity ─────────────────────────────────────── */}
+          <div className="p-4 space-y-2">
+            <button
+              onClick={() => toggleSection('flip')}
+              className="flex items-center gap-1 text-xs font-semibold text-zinc-400 hover:text-zinc-200 uppercase tracking-wide"
+            >
+              {openSection.flip ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              Flip Sensitivity
+            </button>
+            {openSection.flip && (
+              trace.flip_threshold ? (
+                <div className="space-y-2 text-xs font-mono">
+                  <p className="text-zinc-300">
+                    <span className="text-orange-400">{name(trace.flip_threshold.a)}</span>
+                    <span className="text-zinc-500 mx-2">vs</span>
+                    <span className="text-zinc-300">{name(trace.flip_threshold.b)}</span>
+                  </p>
+                  <p>
+                    <span className="text-zinc-500">score_gap: </span>
+                    <span className={deltaColor(trace.flip_threshold.score_gap)}>
+                      {trace.flip_threshold.score_gap > 0 ? '+' : ''}
+                      {trace.flip_threshold.score_gap.toLocaleString('da-DK', { maximumFractionDigits: 2 })}
+                    </span>
+                  </p>
+                  {/* Visual bar */}
+                  <div className="relative h-2 w-full bg-zinc-800 rounded overflow-hidden">
+                    {(() => {
+                      const gap = trace.flip_threshold.score_gap
+                      const absGap = Math.abs(gap)
+                      const pct = Math.min(absGap / (absGap + 1) * 50 + 50, 95)
+                      if (gap > 0) {
+                        return <div className="absolute h-full bg-green-700/70" style={{ left: '50%', width: `${pct - 50}%` }} />
+                      }
+                      return <div className="absolute h-full bg-red-700/70" style={{ right: '50%', width: `${pct - 50}%` }} />
+                    })()}
+                    <div className="absolute h-full w-px bg-zinc-400/50" style={{ left: '50%' }} />
+                  </div>
+                  <p className="text-zinc-600 italic">{trace.flip_threshold.interpretation}</p>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-500 italic">Only one candidate — no flip analysis</p>
+              )
+            )}
+          </div>
+
+          {/* ── C.4 Contribution breakdown ───────────────────────────────── */}
+          <div className="p-4 space-y-2">
+            <button
+              onClick={() => toggleSection('contributors')}
+              className="flex items-center gap-1 text-xs font-semibold text-zinc-400 hover:text-zinc-200 uppercase tracking-wide"
+            >
+              {openSection.contributors ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              Contribution Breakdown
+            </button>
+            {openSection.contributors && (
+              <div className="space-y-3">
+                {/* Rider contributors */}
+                {trace.contributors?.rider_contributors?.length > 0 && (
+                  <div>
+                    <p className="text-xs text-zinc-500 mb-1">Rider contributors</p>
+                    <table className="text-xs w-full max-w-xs">
+                      <thead>
+                        <tr className="text-zinc-600 border-b border-zinc-800">
+                          <th className="text-left py-1">Rider</th>
+                          <th className="text-right py-1">Share</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trace.contributors.rider_contributors.map(c => (
+                          <tr key={c.label} className="border-b border-zinc-800/40">
+                            <td className="py-1 text-zinc-300">{c.label}</td>
+                            <td className="py-1 text-right text-orange-400 tabular-nums">
+                              {Math.round(c.share * 100)}%
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {/* Scenario contributions — only when present */}
+                {trace.contributors?.scenario_contributions && trace.contributors.scenario_contributions.length > 0 && (
+                  <div>
+                    <p className="text-xs text-zinc-500 mb-1">Scenario contributions</p>
+                    <table className="text-xs w-full max-w-xs">
+                      <thead>
+                        <tr className="text-zinc-600 border-b border-zinc-800">
+                          <th className="text-left py-1">Scenario</th>
+                          <th className="text-right py-1">Share</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trace.contributors.scenario_contributions.map(c => (
+                          <tr key={c.label} className="border-b border-zinc-800/40">
+                            <td className="py-1 text-zinc-300">{c.label.replace('_', ' ')}</td>
+                            <td className="py-1 text-right text-blue-400 tabular-nums">
+                              {Math.round(c.share * 100)}%
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function BriefingPage() {
@@ -762,6 +1095,15 @@ export default function BriefingPage() {
           )}
           </div>{/* end reSimulating opacity wrapper */}
         </div>
+      )}
+
+      {/* Decision Trace Inspector */}
+      {briefResult?.decision_trace && (
+        <DecisionTraceInspector
+          trace={briefResult.decision_trace}
+          riderNameMap={Object.fromEntries(riders.map(r => [r.holdet_id, r.name]))}
+          candidates={briefResult.captain_candidates ?? []}
+        />
       )}
 
       {/* Gather Intelligence */}

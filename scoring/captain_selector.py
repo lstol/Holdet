@@ -85,6 +85,8 @@ def select_captain(
         flip_threshold = {
             "score_gap":     D,
             "interpretation": "A wins if score_gap > 0",
+            "a":              a["rider_id"],
+            "b":              b["rider_id"],
         }
 
     return captain_id, scored[:5], captain_trace, flip_threshold

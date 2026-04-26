@@ -2,7 +2,7 @@
 # Each session has a clear goal, defined inputs, and a done condition.
 # Do not start a session until the previous session's done condition is met.
 # If debugging becomes circular (3+ failed attempts), stop and bring to Claude.ai.
-# Last updated: 2026-04-26 (Session 22.5 complete: decision traceability layer)
+# Last updated: 2026-04-26 (Session 22.6 complete: frontend trace inspector panel)
 
 ---
 
@@ -870,6 +870,22 @@ BALANCED on ≥1 real stage, with documented reason.
 
 ---
 
+### Session 22.6 — Frontend Trace Inspector Panel ✅ COMPLETE (2026-04-26)
+**Goal:** Expose decision_trace API data as a collapsible inspector panel in the briefing UI
+
+**What was built:**
+- Chapter 0 hardening: `a`/`b` rider IDs added to `flip_threshold` in `captain_selector.py`
+- TypeScript interfaces: `RiderTrace`, `CaptainCandidate`, `CaptainTrace`, `FlipThreshold`, `Contributor`, `DecisionTrace`
+- `BriefResult` extended with `decision_trace?`, `captain_candidates?`, `captain_recommendation?`
+- `deltaColor()` and `fmtDelta()` helper functions
+- `DecisionTraceInspector` component with 4 collapsible sections (riders, captain, flip, contributors)
+- Component gated by `trace_version == "22.5"` sentinel
+- Wired into `briefing/page.tsx` JSX between briefing result and Gather Intelligence
+
+**Tests: 449 scoring tests passing (stable)**
+
+---
+
 ## Phase 4 — Competitive Edge Layer (Sessions 23–25)
 
 ### Session 23 — Intelligence Automation + Differential Picks
@@ -970,6 +986,7 @@ clean briefing.
 | 21            | ✓ complete (2026-04-26)   | Unified probability shaping layer    | All intelligence in one pipeline     | 510   |
 | 22            | ✓ complete (2026-04-26)   | Variance-aware shaping + captain     | Mode-driven nudge + captain module   | 519   |
 | 22.5          | ✓ complete (2026-04-26)   | Decision traceability layer          | Ablation + contributor + trace API   | 526   |
+| 22.6          | ✓ complete (2026-04-26)   | Frontend trace inspector panel       | Trace data visible in briefing UI    | 449   |
 | 23            | planned                   | Intelligence + differential picks    | Biggest competitive edge             | ~494  |
 | 24            | planned                   | Hardening + performance              | Production-ready final week          | ~502  |
 | 25            | planned                   | Retrospective + TdF prep             | Season learning, next race           | ~510  |
