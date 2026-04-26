@@ -2,7 +2,7 @@
 # Each session has a clear goal, defined inputs, and a done condition.
 # Do not start a session until the previous session's done condition is met.
 # If debugging becomes circular (3+ failed attempts), stop and bring to Claude.ai.
-# Last updated: 2026-04-26 (Session 20 complete: identity-aware lookahead EV layer)
+# Last updated: 2026-04-26 (Session 21 complete: unified probability shaping + frontend fixes)
 
 ---
 
@@ -834,17 +834,21 @@ BALANCED on ≥1 real stage, with documented reason.
 
 ---
 
-### Session 21 — Optimizer Quality
-**Goal:** Faster, smarter optimization
+### Session 21 — Unified Probability Shaping + Frontend Fixes ✅ COMPLETE
+**Goal:** Formalize two-layer architecture; fix 4 frontend bugs
 
-**What to build:**
-- Shared simulation pool (avoid re-simulating same riders — ~4× speedup)
-- Double-swap weighting by p95
-- n_sim auto-scaling: bump to 2000 for final 5 stages
-- State backup to Supabase (⚠️ pull forward if Railway drops state.json even once)
-- λ volatility-based auto-adaptation (candidate)
+**What was built:**
+- `scoring/probability_shaper.py` — `ProbabilityContext`, `apply_probability_shaping()`, 6-layer pipeline
+- `STAGE_ROLE_MULTIPLIER` — Carapaz fix: climbers penalized on sprint stages
+- `config.get_n_sim()` — auto-scale sim count by race position
+- Optimizer DESIGN INVARIANT comment + `eval_fn` wired into double-swap loop
+- API `prob_shaping_trace` in every `/brief` response
+- CLI and API use identical `ProbabilityContext` pipeline
+- Frontend: sliders before first run (C1), re-sim overlay (C2), riders cache (C3), tab-switch state (C4)
+- `tests/test_probability_shaper.py` — 5 new tests
+- `TestSession21Optimizer` — 3 new tests
 
-**Target: 476 tests passing (+8)**
+**Tests: 510 passing (+8)**
 
 ---
 
