@@ -37,6 +37,7 @@ from scoring.probability_shaper import ProbabilityContext, apply_probability_sha
 from scoring.simulator import simulate_all_riders, STAGE_SCENARIOS, _resolve_scenarios, simulate_team
 from scoring.optimizer import optimize_all_profiles, suggest_profile, RiskProfile
 from scoring.captain_selector import select_captain
+from scoring.decision_trace import build_decision_traces, build_contributors
 from scoring.stage_intent import StageIntent, compute_stage_intent, apply_intelligence_signals, INTENT_FIELDS
 from output.tracker import record_stage_accuracy, save_accuracy
 
@@ -448,11 +449,35 @@ def post_brief(req: BriefRequest) -> dict:
 
     # Captain selection (runs after optimizer — uses shaped probs + per-rider sim results)
     variance_mode = req.variance_mode or "balanced"
-    captain_id, captain_candidates = select_captain(
+    captain_id, captain_candidates, captain_trace, flip_threshold = select_captain(
         team=my_team,
         probs=probs,
         sim_results=all_sims,
         mode=variance_mode,
+    )
+
+    # Decision trace (ablation layer — no optimizer re-run, simulation level only)
+    ev_full = {rid: sr.expected_value for rid, sr in all_sims.items()}
+    decision_traces = build_decision_traces(
+        riders=riders,
+        stage=stage,
+        raw_probs=raw_probs,
+        ctx=ctx,
+        ev_full=ev_full,
+    )
+
+    # Contributors
+    rider_names_map = {r.holdet_id: r.name for r in riders}
+    balanced_result = recommendations.get(RiskProfile.BALANCED)
+    realized_scenario_stats_raw: dict = {}
+    if balanced_result and balanced_result.team_result:
+        realized_scenario_stats_raw = balanced_result.team_result.scenario_stats
+    contributors = build_contributors(
+        my_team=my_team,
+        sim_results=all_sims,
+        rider_names=rider_names_map,
+        scenario_stats=realized_scenario_stats_raw if realized_scenario_stats_raw else None,
+        scenario_priors=req.scenario_priors,
     )
 
     # Suggested profile
@@ -503,12 +528,6 @@ def post_brief(req: BriefRequest) -> dict:
         for rid in my_team if rid in all_sims
     ]
 
-    # Extract scenario_stats from BALANCED profile's team_result (realized frequencies)
-    balanced_result = recommendations.get(RiskProfile.BALANCED)
-    realized_scenario_stats: dict = {}
-    if balanced_result and balanced_result.team_result:
-        realized_scenario_stats = balanced_result.team_result.scenario_stats
-
     resp: dict = {
         "stage_number": req.stage,
         "stage_type": stage.stage_type,
@@ -528,9 +547,26 @@ def post_brief(req: BriefRequest) -> dict:
         "team_sims": team_sims,
         "dns_alerts": dns_alerts,
         "scenario_priors": {k: round(v, 4) for k, v in resolved_scenarios.items()},
-        "scenario_stats": {k: round(v, 4) for k, v in realized_scenario_stats.items()},
+        "scenario_stats": {k: round(v, 4) for k, v in realized_scenario_stats_raw.items()},
         "stage_intent": {f: getattr(intent, f) for f in INTENT_FIELDS},
         "prob_shaping_trace": prob_shaping_trace,
+        "decision_trace": {
+            "riders": {
+                rid: {
+                    "base_ev":                round(dt.base_ev),
+                    "probability_adjustment": round(dt.probability_adjustment),
+                    "variance_adjustment":    round(dt.variance_adjustment),
+                    "intent_adjustment":      0.0,
+                    "lookahead_adjustment":   round(dt.lookahead_adjustment),
+                    "final_ev":               round(dt.final_ev),
+                }
+                for rid, dt in decision_traces.items()
+            },
+            "captain_trace":   captain_trace,
+            "flip_threshold":  flip_threshold,
+            "contributors":    contributors,
+            "trace_version":   "22.5",
+        },
     }
     if not my_team:
         resp["team_note"] = "No team picked yet — showing best team to select from scratch."

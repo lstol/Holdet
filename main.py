@@ -600,7 +600,36 @@ def cmd_brief(args) -> None:
     )
     print("\n" + format_briefing(briefing_output, state))
 
-    # 6b. Optional lookahead table (--lookahead flag)
+    # 6b. Optional decision trace output (--trace-level flag)
+    trace_level = getattr(args, "trace_level", "off")
+    if trace_level in ("minimal", "full"):
+        from scoring.decision_trace import build_decision_traces
+        from scoring.captain_selector import select_captain
+        ev_full_map = {rid: sr.expected_value for rid, sr in all_sims.items()}
+        decision_traces = build_decision_traces(
+            riders=riders, stage=stage, raw_probs=raw_probs, ctx=ctx, ev_full=ev_full_map,
+        )
+        cap_id, cap_candidates, cap_trace, flip_thresh = select_captain(
+            team=my_team, probs=probs, sim_results=all_sims, mode="balanced",
+        )
+        print(f"\n[trace] Captain: {cap_id}  lambda={cap_trace['lambda']}  "
+              f"ev={cap_trace['ev_component']:.0f}  p_win={cap_trace['p_win_component']:.4f}  "
+              f"score={cap_trace['final_score']:.0f}")
+        if flip_thresh:
+            print(f"[trace] Flip threshold: score_gap={flip_thresh['score_gap']:.0f}  "
+                  f"({flip_thresh['interpretation']})")
+        if trace_level == "full":
+            sorted_traces = sorted(
+                decision_traces.values(), key=lambda dt: dt.final_ev, reverse=True
+            )
+            print("\n[trace] Top 10 riders by final EV:")
+            print(f"  {'rider_id':<12} {'base_ev':>10} {'prob_adj':>10} {'var_adj':>8} {'final_ev':>10}")
+            for dt in sorted_traces[:10]:
+                print(f"  {dt.rider_id:<12} {dt.base_ev:>10.0f} "
+                      f"{dt.probability_adjustment:>+10.0f} "
+                      f"{dt.variance_adjustment:>+8.0f} {dt.final_ev:>10.0f}")
+
+    # 6c. Optional lookahead table (--lookahead flag)
     if _lookahead_requested:
         forward_stages = _load_stages_from(config.get_stages_path(), args.stage)
         if not forward_stages:
@@ -1176,6 +1205,7 @@ def main() -> None:
     p_brief.add_argument("--override", metavar="PATH", help="Path to override JSON file (e.g. overrides/stage_3.json)")
     p_brief.add_argument("--lambda", dest="lambda_val", type=float, default=None, metavar="FLOAT", help="Transfer discount factor (default: 0.85 from config)")
     p_brief.add_argument("--lookahead", action="store_true", help="[reserved] Multi-stage lookahead (Session 20)")
+    p_brief.add_argument("--trace-level", dest="trace_level", choices=["off", "minimal", "full"], default="off", help="Decision trace verbosity (default: off)")
 
     # settle
     p_settle = sub.add_parser("settle", help="Record stage results and update state")

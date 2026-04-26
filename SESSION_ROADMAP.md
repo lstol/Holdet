@@ -2,7 +2,7 @@
 # Each session has a clear goal, defined inputs, and a done condition.
 # Do not start a session until the previous session's done condition is met.
 # If debugging becomes circular (3+ failed attempts), stop and bring to Claude.ai.
-# Last updated: 2026-04-26 (Session 22 complete: variance-aware shaping + captain selector module)
+# Last updated: 2026-04-26 (Session 22.5 complete: decision traceability layer)
 
 ---
 
@@ -969,6 +969,7 @@ clean briefing.
 | 20            | ✓ complete (2026-04-26)   | Identity-aware lookahead EV layer    | Per-rider multi-stage projection     | 502   |
 | 21            | ✓ complete (2026-04-26)   | Unified probability shaping layer    | All intelligence in one pipeline     | 510   |
 | 22            | ✓ complete (2026-04-26)   | Variance-aware shaping + captain     | Mode-driven nudge + captain module   | 519   |
+| 22.5          | ✓ complete (2026-04-26)   | Decision traceability layer          | Ablation + contributor + trace API   | 526   |
 | 23            | planned                   | Intelligence + differential picks    | Biggest competitive edge             | ~494  |
 | 24            | planned                   | Hardening + performance              | Production-ready final week          | ~502  |
 | 25            | planned                   | Retrospective + TdF prep             | Season learning, next race           | ~510  |

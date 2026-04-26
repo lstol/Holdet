@@ -53,7 +53,7 @@ class TestCaptainSelector:
         sim_results = {rid: _SimResult(rider_id=rid, expected_value=float(i * 10_000))
                        for i, rid in enumerate(["r1", "r2", "r3", "r4", "r5"])}
 
-        captain_id, candidates = select_captain(team, probs, sim_results, mode="balanced")
+        captain_id, candidates, _, _ = select_captain(team, probs, sim_results, mode="balanced")
 
         assert captain_id in team, f"captain_id '{captain_id}' is not in team {team}"
         for c in candidates:
@@ -79,8 +79,8 @@ class TestCaptainSelector:
             "win_machine": _SimResult(rider_id="win_machine", expected_value=0.5),
         }
 
-        stable_captain, _     = select_captain(team, probs, sim_results, mode="stable")
-        aggressive_captain, _ = select_captain(team, probs, sim_results, mode="aggressive")
+        stable_captain, _, _, _     = select_captain(team, probs, sim_results, mode="stable")
+        aggressive_captain, _, _, _ = select_captain(team, probs, sim_results, mode="aggressive")
 
         assert stable_captain == "ev_king", "stable mode must pick highest EV rider"
         assert aggressive_captain == "win_machine", "aggressive mode must prefer high p_win"
@@ -94,7 +94,7 @@ class TestCaptainSelector:
             for i, rid in enumerate(team)
         }
 
-        _, candidates = select_captain(team, probs, sim_results, mode="balanced")
+        _, candidates, _, _ = select_captain(team, probs, sim_results, mode="balanced")
         assert len(candidates) == 5
 
     def test_captain_candidates_sorted_by_score(self):
@@ -106,7 +106,7 @@ class TestCaptainSelector:
             for i, rid in enumerate(team)
         }
 
-        _, candidates = select_captain(team, probs, sim_results, mode="balanced")
+        _, candidates, _, _ = select_captain(team, probs, sim_results, mode="balanced")
         scores = [c["score"] for c in candidates]
         assert scores == sorted(scores, reverse=True), "candidates must be sorted descending by score"
 
@@ -120,7 +120,7 @@ class TestCaptainSelector:
             for rid in team
         }
 
-        _, candidates = select_captain(team, probs, sim_results, mode="stable")
+        _, candidates, _, _ = select_captain(team, probs, sim_results, mode="stable")
         for c in candidates:
             rid = c["rider_id"]
             assert abs(c["ev"] - expected_evs[rid]) < 1e-6, (
