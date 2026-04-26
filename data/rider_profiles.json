@@ -1,0 +1,5 @@
+{
+  "merlier":    {"sprint_bias": 1.12, "consistency": 0.95},
+  "vingegaard": {"gc_bias": 1.10, "consistency": 1.05},
+  "garbich":    {"gc_bias": 0.95, "consistency": 0.85}
+}

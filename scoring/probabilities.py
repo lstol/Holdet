@@ -512,6 +512,63 @@ def apply_rider_adjustments(
     return result
 
 
+# ── Rider identity profiles ───────────────────────────────────────────────────
+
+def apply_rider_profiles(
+    probs: dict[str, "RiderProb"],
+    profiles: dict[str, "RiderProfile"],
+    role_map: dict[str, str],  # rider_id → RiderRole constant string
+) -> dict[str, "RiderProb"]:
+    """Apply structural identity multipliers to rider probabilities.
+
+    Rider profiles are structural bias signals, not learned parameters.
+    Must not modify ROLE_TOP15, scenario priors, or calibration outputs.
+    Returns a new probs dict — does not mutate input.
+    """
+    import copy
+    from scoring.rider_profiles import RiderProfile  # noqa: F401 (type hint only)
+    result = copy.deepcopy(probs)
+
+    for rider_id, rp in result.items():
+        profile = profiles.get(rider_id)
+        if not profile:
+            continue  # missing profile = neutral (1.0) — no error
+
+        role = role_map.get(rider_id, "")
+
+        # Role bias applied to p_win only (identity signal)
+        if role == RiderRole.SPRINTER:
+            rp.p_win *= profile.sprint_bias
+        elif role == RiderRole.CLIMBER:
+            rp.p_win *= profile.climb_bias
+        elif role == RiderRole.GC_CONTENDER:
+            rp.p_win *= profile.gc_bias
+
+        # Consistency applied to ALL four fields uniformly
+        rp.p_win   *= profile.consistency
+        rp.p_top3  *= profile.consistency
+        rp.p_top10 *= profile.consistency
+        rp.p_top15 *= profile.consistency
+
+        # Clamp to [0, 1]
+        rp.p_win   = _clamp(rp.p_win)
+        rp.p_top3  = _clamp(rp.p_top3)
+        rp.p_top10 = _clamp(rp.p_top10)
+        rp.p_top15 = _clamp(rp.p_top15)
+
+        # Re-enforce ordering: p_win ≤ p_top3 ≤ p_top10 ≤ p_top15
+        rp.p_top3  = max(rp.p_win,   rp.p_top3)
+        rp.p_top10 = max(rp.p_top3,  rp.p_top10)
+        rp.p_top15 = max(rp.p_top10, rp.p_top15)
+
+        # Source deduplication — same set-union pattern as apply_rider_adjustments
+        sources = set(rp.source.split("+"))
+        sources.add("profile")
+        rp.source = "+".join(sorted(sources))
+
+    return result
+
+
 # ── Persistence ───────────────────────────────────────────────────────────────
 
 def save_probs(

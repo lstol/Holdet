@@ -27,8 +27,10 @@ from scoring.engine import (
 )
 from scoring.probabilities import (
     generate_priors, interactive_adjust, save_probs,
-    apply_rider_adjustments, _find_rider,
+    apply_rider_adjustments, apply_rider_profiles, _find_rider,
+    _rider_type,
 )
+from scoring.rider_profiles import RiderProfile
 from scoring.odds import cli_odds_input
 from scoring.simulator import simulate_all_riders
 from scoring.optimizer import (
@@ -296,6 +298,36 @@ def cmd_ingest(args) -> None:
     print(f"\nState saved to {state_path}")
 
 
+def _resolve_profiles(
+    profiles_raw: dict,
+    riders: list,
+) -> dict[str, "RiderProfile"]:
+    """Fuzzy-match name fragments in profiles_raw to holdet_ids.
+
+    Returns {rider_id: RiderProfile}. Unmatched fragments are silently skipped.
+    """
+    result: dict = {}
+    for fragment, fields in profiles_raw.items():
+        frag_lower = fragment.lower()
+        match = None
+        for r in riders:
+            if frag_lower in r.name.lower():
+                match = r.holdet_id
+                break
+        if match is None:
+            continue
+        profile = RiderProfile(
+            rider_id=match,
+            sprint_bias=fields.get("sprint_bias", 1.0),
+            gc_bias=fields.get("gc_bias", 1.0),
+            climb_bias=fields.get("climb_bias", 1.0),
+            consistency=fields.get("consistency", 1.0),
+        )
+        profile.clamp()
+        result[match] = profile
+    return result
+
+
 def cmd_brief(args) -> None:
     """Generate pre-stage briefing across all 4 risk profiles."""
     riders_path = config.get_riders_path()
@@ -379,6 +411,17 @@ def cmd_brief(args) -> None:
     adjustments = state.get("rider_adjustments", {}).get(str(args.stage), {})
     if adjustments:
         probs = apply_rider_adjustments(probs, adjustments)
+
+    # 2c. Structural rider profiles (static multipliers, not learned parameters)
+    profiles_path = config.get_rider_profiles_path()
+    profiles_raw: dict = {}
+    if os.path.exists(profiles_path):
+        with open(profiles_path, encoding="utf-8") as fh:
+            profiles_raw = json.load(fh)
+    profiles = _resolve_profiles(profiles_raw, riders)
+    if profiles:
+        role_map = {r.holdet_id: _rider_type(r, stage) for r in riders}
+        probs = apply_rider_profiles(probs, profiles, role_map)
 
     # 3. Simulate team only (fast preview)
     team_riders = [r for r in riders if r.holdet_id in my_team]

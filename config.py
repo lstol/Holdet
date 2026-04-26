@@ -55,6 +55,9 @@ def get_riders_path() -> str:
 def get_stages_path() -> str:
     return _optional("STAGES_PATH", "data/stages.json")
 
+def get_rider_profiles_path() -> str:
+    return _optional("RIDER_PROFILES_PATH", "data/rider_profiles.json")
+
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
